@@ -1,8 +1,8 @@
 {
- "id": "chords", "version": "0.1",
+ "id": "chords", "version": "0.2",
  "license": "GPL-2.0-or-later",
  "title": "CHORDS (scale-aware chords)", "category": "Sequencer", "author": "stephen",
- "description": "Scale-aware chords for the Digitone mk1 and Digitone Keys: hold a synth track's key, pick CHORDS in the Mod Menu, then a chord type (TRIAD, SUS2, SUS4, 6TH, 7TH, 9TH, ADD9) and a voicing (CLOSE, INV 1-3, OPEN). Each single-note trig on that track then plays that chord in the track's keyboard ROOT and SCALE; trigs that already hold a chord play as stored. Settings are per track and last until power-off. Needs core-dn1 3.1 and seq-events.",
+ "description": "Scale-aware chords for the Digitone mk1 and Digitone Keys, on a third AMP page, Chords: CHRD and VOIC, kept in the sound and p-lockable like any stock knob. CHRD KEY makes the chords a trig holds (the Note Add menu's MAJOR, MINOR, DOM. 7TH ...) follow the track's keyboard ROOT and SCALE, so a MAJOR shape on D in C major plays D minor; TRI, SUS2, SUS4, 6TH, 7TH, 9TH and ADD9 do that and also make each single-note trig that chord in the key. VOIC: CLS, INV1-3, OPEN. Needs core-dn1 3.3 and seq-events.",
  "device": "digitone-mk1", "os": "1.43",
  "ports": {"1.44": {}},
  "sources": ["chords.c"],
@@ -10,9 +10,13 @@
   {"event": "ev_fire_notes", "fn": "chords_notes", "order": 50}
  ],
  "contribute": [
-  {"to": "core_menu", "order": 60, "data": "00000000",
-   "relocs": [[0, "abs32", "sym:chords_menu", 0]]}
+  {"to": "core_params", "order": 50, "data": "00000000",
+   "relocs": [[0, "abs32", "sym:chords_chrd", 0]]},
+  {"to": "core_params", "order": 51, "data": "00000000",
+   "relocs": [[0, "abs32", "sym:chords_voic", 0]]},
+  {"to": "core_pages", "order": 50, "data": "00000000",
+   "relocs": [[0, "abs32", "sym:chords_page", 0]]}
  ],
- "resources": {"core": "3.1"},
+ "resources": {"names": ["param:182", "param:183", "page:27"], "core": "3.3"},
  "requires": ["core", "seq-events"]
 }

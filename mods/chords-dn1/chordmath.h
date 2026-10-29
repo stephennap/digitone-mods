@@ -93,40 +93,34 @@ static void ch_sort(int32_t *t, int32_t n)
     }
 }
 
-/* Builds the chord for one played note. note: a MIDI note 0-127; root: the keyboard's ROOT (a MIDI
- * note); scale: -1 chromatic, else 0-34. -> how many of notes[] it wrote (notes[0] the lowest
- * tone, the rest its intervals above it, each 1-127), or 0: play as stock (chord off, a scale with
- * no known notes, or a note outside the scale). */
-static int32_t ch_build(int32_t note, int32_t root, int32_t scale, int32_t type, int32_t voicing,
-                        int8_t notes[CH_MAX_TONES])
+/* The scale's degrees (semitones above ROOT, ascending) and the played note's degree. -> how many
+ * degrees (k), with *d the note's, or 0: no known notes, or the note is not in the scale. */
+static int32_t ch_degree(int32_t note, int32_t root, int32_t scale, int32_t deg[12], int32_t *d)
 {
-    int32_t tones[CH_MAX_TONES], n = 0, i;
-
-    if (note < 0 || note > 127 || type <= CH_OFF || type >= CH_TYPES)
+    int32_t k = 0, pc, s;
+    uint32_t mask;
+    if (scale < 0 || scale >= CH_SCALES || !(mask = ch_scale_mask[scale]))
         return 0;
-    if (scale < 0) {                    /* chromatic: fixed shapes */
-        for (i = 0; ch_chromatic[type][i] >= 0; i++)
-            tones[n++] = note + ch_chromatic[type][i];
-    } else {
-        int32_t deg[12], k = 0, pc, d = -1, s;
-        uint32_t mask;
-        if (scale >= CH_SCALES || !(mask = ch_scale_mask[scale]))
-            return 0;
-        for (s = 0; s < 12; s++)
-            if (mask & (1u << s))
-                deg[k++] = s;
-        pc = ((note - root) % 12 + 12) % 12;
-        for (s = 0; s < k; s++)
-            if (deg[s] == pc)
-                d = s;
-        if (d < 0)                      /* not in the scale: leave it alone */
-            return 0;
-        for (i = 0; ch_degrees[type][i] >= 0; i++) {
-            int32_t j = d + ch_degrees[type][i];
-            tones[n++] = note + deg[j % k] - deg[d] + 12 * (j / k);
+    for (s = 0; s < 12; s++)
+        if (mask & (1u << s))
+            deg[k++] = s;
+    pc = ((note - root) % 12 + 12) % 12;
+    for (s = 0; s < k; s++)
+        if (deg[s] == pc) {
+            *d = s;
+            return k;
         }
-    }
+    return 0;
+}
 
+/* Voices tones[0..n-1] (absolute MIDI notes, root position) and writes them as the firmware's
+ * notes: notes[0] the lowest, the rest intervals above it, each 1-127. -> n, or 0: it cannot (a
+ * tone out of the MIDI range, or two the same). */
+static int32_t ch_voice(int32_t *tones, int32_t n, int32_t voicing, int8_t notes[CH_MAX_TONES])
+{
+    int32_t i;
+    if (n < 2 || n > CH_MAX_TONES)
+        return 0;
     if (voicing >= CH_INV1 && voicing <= CH_INV3) {
         for (i = 0; i < voicing && i < n - 1; i++)
             tones[i] += 12;
@@ -148,6 +142,61 @@ static int32_t ch_build(int32_t note, int32_t root, int32_t scale, int32_t type,
     for (i = 1; i < n; i++)
         notes[i] = (int8_t)(tones[i] - tones[0]);
     return n;
+}
+
+/* Builds a chord for one played note. note: a MIDI note 0-127; root: the keyboard's ROOT (a MIDI
+ * note); scale: -1 chromatic, else 0-34. -> how many of notes[] it wrote, or 0: play as stock
+ * (chord off, a scale with no known notes, or a note outside the scale). */
+static int32_t ch_build(int32_t note, int32_t root, int32_t scale, int32_t type, int32_t voicing,
+                        int8_t notes[CH_MAX_TONES])
+{
+    int32_t tones[CH_MAX_TONES], n = 0, i;
+
+    if (note < 0 || note > 127 || type <= CH_OFF || type >= CH_TYPES)
+        return 0;
+    if (scale < 0) {                    /* chromatic: fixed shapes */
+        for (i = 0; ch_chromatic[type][i] >= 0; i++)
+            tones[n++] = note + ch_chromatic[type][i];
+    } else {
+        int32_t deg[12], k, d = 0;
+        if (!(k = ch_degree(note, root, scale, deg, &d)))
+            return 0;
+        for (i = 0; ch_degrees[type][i] >= 0; i++) {
+            int32_t j = d + ch_degrees[type][i];
+            tones[n++] = note + deg[j % k] - deg[d] + 12 * (j / k);
+        }
+    }
+    return ch_voice(tones, n, voicing, notes);
+}
+
+/* A stored chord's interval, in semitones within the octave, as the scale steps it stands for:
+ * a 2nd (1-2), a 3rd (3-4), a 4th (5), a 5th (6-7: a diminished one too), a 6th (8-9), a 7th
+ * (10-11). */
+static const int8_t ch_step_of[12] = { 0, 1, 1, 2, 2, 3, 4, 4, 5, 5, 6, 6 };
+
+/* Makes a stored chord follow the key: in[0] the note, in[1..] its intervals (0 none), as the
+ * Note Add menu writes them. Each interval moves to the same scale step above the note, its
+ * octave kept, so a MAJOR shape on the second degree of a major key plays a minor chord. Only for
+ * 7-note scales: a step means nothing in the others. -> as ch_voice, or 0: play as stock. */
+static int32_t ch_follow(const int8_t in[CH_MAX_TONES], int32_t root, int32_t scale,
+                         int32_t voicing, int8_t notes[CH_MAX_TONES])
+{
+    int32_t tones[CH_MAX_TONES], deg[12], k, d = 0, n = 1, i, note = in[0];
+
+    if (note < 0 || (k = ch_degree(note, root, scale, deg, &d)) != 7)
+        return 0;
+    tones[0] = note;
+    for (i = 1; i < CH_MAX_TONES; i++) {
+        int32_t iv = in[i], j;
+        if (!iv)
+            continue;
+        if (iv < 0)                     /* not a shape the menu writes: leave the chord alone */
+            return 0;
+        j = d + ch_step_of[iv % 12];
+        tones[n++] = note + deg[j % 7] - deg[d] + 12 * (j / 7) + 12 * (iv / 12);
+    }
+    ch_sort(tones, n);
+    return ch_voice(tones, n, voicing, notes);
 }
 
 #endif

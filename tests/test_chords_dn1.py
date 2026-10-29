@@ -62,21 +62,55 @@ OFF, TRIAD, SUS2, SUS4, SIXTH, SEVENTH, NINTH, ADD9 = range(8)
 CLOSE, INV1, INV2, INV3, OPEN = range(5)
 
 
+def degree(note, root, scale, table):
+    if not 0 <= scale < 35 or not table[scale]:
+        return None, None
+    deg = [s for s in range(12) if table[scale] >> s & 1]
+    pc = (note - root) % 12
+    return (deg, deg.index(pc)) if pc in deg else (None, None)
+
+
 def build(note, root, scale, typ, voicing, table):
     if not 0 <= note <= 127 or not OFF < typ < 8:
         return None
     if scale < 0:
         tones = [note + s for s in CHROMATIC[typ]]
     else:
-        if scale >= 35 or not table[scale]:
+        deg, d = degree(note, root, scale, table)
+        if deg is None:
             return None
-        deg = [s for s in range(12) if table[scale] >> s & 1]
         k = len(deg)
-        pc = (note - root) % 12
-        if pc not in deg:
-            return None
-        d = deg.index(pc)
         tones = [note + deg[(d + o) % k] - deg[d] + 12 * ((d + o) // k) for o in DEGREES[typ]]
+    return voice(tones, voicing)
+
+
+STEP_OF = [0, 1, 1, 2, 2, 3, 4, 4, 5, 5, 6, 6]
+
+
+def follow(stored, root, scale, voicing, table):
+    """stored: the trig's 8 bytes, the note then intervals (0 none)."""
+    note = stored[0]
+    if note < 0:
+        return None
+    deg, d = degree(note, root, scale, table)
+    if deg is None or len(deg) != 7:
+        return None
+    tones = [note]
+    for iv in stored[1:]:
+        if not iv:
+            continue
+        if iv < 0:
+            return None
+        j = d + STEP_OF[iv % 12]
+        tones.append(note + deg[j % 7] - deg[d] + 12 * (j // 7) + 12 * (iv // 12))
+    tones.sort()
+    return voice(tones, voicing)
+
+
+def voice(tones, voicing):
+    tones = list(tones)
+    if not 2 <= len(tones) <= 8:
+        return None
     if INV1 <= voicing <= INV3:
         for i in range(min(voicing, len(tones) - 1)):
             tones[i] += 12
@@ -146,6 +180,75 @@ def test_chromatic_uses_fixed_shapes():
     t = masks()
     assert names(build(61, C4, -1, TRIAD, CLOSE, t)) == [61, 65, 68]      # C# major
     assert names(build(C4, C4, -1, SEVENTH, CLOSE, t)) == [60, 64, 67, 70]
+
+
+# The Note Add menu's shapes (1.43: 0x401d3fc5, 4 bytes each, -1 unused): MAJOR, MINOR, DOM. 7TH,
+# MINOR 7TH, MAJOR 7TH, DIMINISHED, DIM. 7TH, then five more.
+MENU_SHAPES = [[0, 4, 7], [0, 3, 7], [0, 4, 7, 10], [0, 3, 7, 10], [0, 4, 7, 11], [0, 3, 6],
+               [0, 3, 6, 9], [0, 2, 7], [0, 5, 7], [0, 4, 7, 9], [0, 3, 7, 9], [0, 2, 4, 7]]
+
+
+def stored(note, shape):
+    return [note] + shape[1:] + [0] * (8 - len(shape))
+
+
+def test_key_makes_menu_chords_diatonic():
+    t = masks()
+    major, minor, dom7 = MENU_SHAPES[0], MENU_SHAPES[1], MENU_SHAPES[2]
+    # a MAJOR shape on each degree of C major plays that degree's own triad
+    assert names(follow(stored(C4, major), C4, ION, CLOSE, t)) == [60, 64, 67]   # C
+    assert names(follow(stored(D4, major), C4, ION, CLOSE, t)) == [62, 65, 69]   # Dm
+    assert names(follow(stored(B4, major), C4, ION, CLOSE, t)) == [71, 74, 77]   # Bdim
+    # MINOR in C major on C still plays C major: the key decides
+    assert names(follow(stored(C4, minor), C4, ION, CLOSE, t)) == [60, 64, 67]
+    # DOM. 7TH on G in C major is G7; on C it is Cmaj7
+    assert names(follow(stored(G4, dom7), C4, ION, CLOSE, t)) == [67, 71, 74, 77]
+    assert names(follow(stored(C4, dom7), C4, ION, CLOSE, t)) == [60, 64, 67, 71]
+    # in C minor a MAJOR shape on C plays C minor
+    assert names(follow(stored(C4, major), C4, AEOL, CLOSE, t)) == [60, 63, 67]
+
+
+def test_key_keeps_the_chords_octaves_and_takes_a_voicing():
+    t = masks()
+    # a hand-made chord with its third an octave up: C, G, E' stays spread
+    assert names(follow([C4, 7, 16, 0, 0, 0, 0, 0], C4, ION, CLOSE, t)) == [60, 67, 76]
+    assert names(follow(stored(D4, MENU_SHAPES[0]), C4, ION, INV1, t)) == [65, 69, 74]
+
+
+def test_key_leaves_what_it_cannot_place():
+    t = masks()
+    assert follow(stored(61, MENU_SHAPES[0]), C4, ION, CLOSE, t) is None   # C# not in C major
+    assert follow(stored(C4, MENU_SHAPES[0]), C4, PMIN, CLOSE, t) is None  # a 5-note scale
+    assert follow(stored(C4, MENU_SHAPES[0]), C4, -1, CLOSE, t) is None    # chromatic: no key
+    assert follow([C4, -3, 4, 0, 0, 0, 0, 0], C4, ION, CLOSE, t) is None   # a downward interval
+
+
+def test_every_menu_shape_follows_safely():
+    t = masks()
+    for scale in range(35):
+        for note in range(128):
+            for shape in MENU_SHAPES:
+                for v in range(5):
+                    r = follow(stored(note, shape), C4, scale, v, t)
+                    if r is None:
+                        continue
+                    assert len(r) == len(shape)
+                    assert all(1 <= i <= 127 for i in r[1:])
+                    assert all(0 <= n <= 127 for n in names(r))
+
+
+def test_menu_shapes_match_the_os():
+    if not SYX or not os.path.exists(SYX):
+        raise Skip('missing ELEKLOADER_DN_SYX')
+    dev = [d for d in devices.devices() if d.key == 'digitone-mk1'][0]
+    st, d, rel = formats.load(open(SYX, 'rb').read())
+    if rel != dev.releases['1.43']:
+        raise Skip('the table address is 1.43\'s')
+    img = formats.main_image(st, dev)
+    o = 0x401d3fc5 - LOAD
+    for k, shape in enumerate(MENU_SHAPES):
+        rec = [b for b in img[o + 4 * k:o + 4 * k + 4] if b != 0xff]
+        assert rec == shape, 'shape %d: OS %r, test %r' % (k, rec, shape)
 
 
 def test_every_chord_is_safe_for_the_firmware():

@@ -1,85 +1,105 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* CHORDS: scale-aware chords for the Digitone mk1 and Digitone Keys (core-dn1 3.1, seq-events).
- * Hold a synth track's key, pick CHORDS in the Mod Menu, then a chord type and a voicing: from then
- * on each single-note trig on that track plays a chord built from the track's keyboard ROOT and
- * SCALE (a C in C minor plays C, Eb, G). Trigs that already hold a chord play as stored. */
+/* CHORDS: scale-aware chords for the Digitone mk1 and Digitone Keys (core-dn1 3.3, seq-events).
+ * Two knobs on a third AMP page, Chords: CHRD and VOIC, kept in the sound, p-lockable like any stock
+ * knob. CHRD KEY makes the chords a trig holds (the Note Add menu's) follow the track's keyboard ROOT
+ * and SCALE; TRI to ADD9 do that and also make each single-note trig that chord in the key. */
 #include "digitone-mk1/core3.h"
 #include "digitone-mk1/seq.h"
 #include "chordmath.h"
 
-/* Per synth track, written in the UI task, read in the fire: one byte each, so no lock is needed. */
-static volatile uint8_t ch_type[SQ_AUDIO];
-static volatile uint8_t ch_voicing[SQ_AUDIO];
+#define ID_CHRD     182                 /* the parameter ids, claimed as param:182 and param:183 */
+#define ID_VOIC     183
+#define SLOT_CHRD   26                  /* the sound slots they keep their values in (no stock use) */
+#define SLOT_VOIC   65
 
-/* Interrupt level, after every note generator: a single note becomes the track's chord. */
+/* CHRD's values: OFF, KEY, then a chord type each (CH_TRIAD..CH_ADD9 = the value - 1). */
+enum { MODE_OFF, MODE_KEY, MODE_TYPES };
+#define MODES (MODE_TYPES + CH_TYPES - 2)
+
+/* The pattern's lock tables (as fxkit-dn1 reads them): a track's 10319 bytes, a step's row 160, a
+ * slot's lock a big-endian s16 at 2 * slot, -1 for none. 10319 is odd, so read them by bytes. */
+#define LOCKS        0x1e80
+#define TRACK_LOCKS  10319
+#define STEP_LOCKS   160
+
+/* The knob's value as this step plays it: its p-lock, else the sound's. -> 0..count-1 */
+static int32_t ch_value(int32_t track, int32_t step, int32_t slot, int32_t count)
+{
+    uint8_t *pat = fw_pattern, *kit = fw_kit;
+    int32_t v = -1;
+    if (pat && step >= 0 && step < SQ_STEPS) {
+        const volatile uint8_t *p = pat + LOCKS + TRACK_LOCKS * track + STEP_LOCKS * step + 2 * slot;
+        v = (int16_t)(p[0] << 8 | p[1]);
+    }
+    if (v < 0)
+        v = kit ? FW_SOUND_SLOT(kit, track, slot) : 0;
+    v >>= 8;                            /* 8.8 */
+    return v < 0 ? 0 : v >= count ? count - 1 : v;
+}
+
+/* Interrupt level, after every note generator. */
 void chords_notes(int32_t track, int32_t step, int8_t notes[SQ_NOTES])
 {
     struct sq_track info;
     int8_t out[CH_MAX_TONES];
-    int32_t i, n;
+    int32_t i, n, mode, voicing, stored = 0;
 
-    (void)step;
-    if (track < 0 || track >= SQ_AUDIO || ch_type[track] == CH_OFF || notes[0] < 0)
+    if (track < 0 || track >= SQ_AUDIO || notes[0] < 0)
         return;
-    for (i = 1; i < SQ_NOTES; i++)      /* a stored chord: leave it as it is */
-        if (notes[i])
-            return;
+    mode = ch_value(track, step, SLOT_CHRD, MODES);
+    if (mode == MODE_OFF)
+        return;
     if (sq_track_info(track, &info, sizeof info) < 0 || info.root == SQ_ROOT_NONE)
         return;
-    n = ch_build(notes[0], info.root, info.scale, ch_type[track], ch_voicing[track], out);
+    voicing = ch_value(track, step, SLOT_VOIC, CH_VOICINGS);
+    for (i = 1; i < SQ_NOTES; i++)
+        if (notes[i])
+            stored = 1;
+    if (stored)                         /* a chord the trig holds: into the key */
+        n = ch_follow(notes, info.root, info.scale, voicing, out);
+    else if (mode >= MODE_TYPES)        /* one note: the chord CHRD names */
+        n = ch_build(notes[0], info.root, info.scale, mode - 1, voicing, out);
+    else
+        n = 0;
     if (n <= 0)
         return;
     for (i = 0; i < SQ_NOTES; i++)
         notes[i] = i < n ? out[i] : 0;
 }
 
-/* The menus. A submenu's entries are picked through core_menu_open's pick, never their open(). */
-static void ch_none(void *brain, void *event, int32_t track)
+/* ---- the knobs and their page ----------------------------------------------------------------- */
+static void ch_text(char *buf, const char *s)
 {
-    (void)brain, (void)event, (void)track;
+    while ((*buf++ = *s++))
+        ;
 }
 
-#define ITEM(label) { label, ch_none, 0, 0 }
-static const struct core_menu_item ch_t_off = ITEM("OFF"), ch_t_triad = ITEM("TRIAD"),
-    ch_t_sus2 = ITEM("SUS2"), ch_t_sus4 = ITEM("SUS4"), ch_t_6th = ITEM("6TH"),
-    ch_t_7th = ITEM("7TH"), ch_t_9th = ITEM("9TH"), ch_t_add9 = ITEM("ADD9");
-static const void *const ch_types_list[] = {       /* in CH_OFF..CH_ADD9 order */
-    &ch_t_off, &ch_t_triad, &ch_t_sus2, &ch_t_sus4, &ch_t_6th, &ch_t_7th, &ch_t_9th, &ch_t_add9, 0
+static const char *const ch_mode_names[MODES] = {
+    "OFF", "KEY", "TRI", "SUS2", "SUS4", "6TH", "7TH", "9TH", "ADD9"
 };
-static const struct core_menu_item ch_v_close = ITEM("CLOSE"), ch_v_inv1 = ITEM("INV 1"),
-    ch_v_inv2 = ITEM("INV 2"), ch_v_inv3 = ITEM("INV 3"), ch_v_open = ITEM("OPEN");
-static const void *const ch_voicings_list[] = {    /* in CH_CLOSE..CH_OPEN order */
-    &ch_v_close, &ch_v_inv1, &ch_v_inv2, &ch_v_inv3, &ch_v_open, 0
+static const char *const ch_voicing_names[CH_VOICINGS] = { "CLS", "INV1", "INV2", "INV3", "OPEN" };
+
+static void ch_fmt_mode(int32_t value, char *buf)
+{
+    int32_t v = value >> 8;
+    ch_text(buf, ch_mode_names[v < 0 ? 0 : v >= MODES ? MODES - 1 : v]);
+}
+
+static void ch_fmt_voicing(int32_t value, char *buf)
+{
+    int32_t v = value >> 8;
+    ch_text(buf, ch_voicing_names[v < 0 ? 0 : v >= CH_VOICINGS ? CH_VOICINGS - 1 : v]);
+}
+
+const struct core_param chords_chrd = {
+    ID_CHRD, 1, SLOT_CHRD, 0, (MODES - 1) << 8, 0, 0, -1, -1, -1, 0,
+    "Chord", fw_str_amp, "CHRD", ch_fmt_mode, fw_str_empty, 0
 };
-#undef ITEM
-
-static void ch_pick_voicing(void *brain, void *event, int32_t track, int32_t index)
-{
-    (void)brain, (void)event;
-    if (track >= 0 && track < SQ_AUDIO && index >= 0 && index < CH_VOICINGS)
-        ch_voicing[track] = (uint8_t)index;
-}
-
-static void ch_pick_type(void *brain, void *event, int32_t track, int32_t index)
-{
-    (void)brain, (void)event;
-    if (track < 0 || track >= SQ_AUDIO || index < 0 || index >= CH_TYPES)
-        return;
-    ch_type[track] = (uint8_t)index;
-    if (index != CH_OFF)                /* then the voicing, the current one selected */
-        core_menu_open(ch_voicings_list, ch_voicing[track], ch_pick_voicing);
-}
-
-static void ch_open(void *brain, void *event, int32_t track)
-{
-    (void)brain, (void)event;
-    if (track >= 0 && track < SQ_AUDIO)
-        core_menu_open(ch_types_list, ch_type[track], ch_pick_type);
-}
-
-static const uint16_t ch_icon[16] = {   /* three stacked notes on a staff */
-    0x0000, 0xffff, 0x0000, 0x0780, 0x0fc0, 0xffff, 0x0780, 0x01e0,
-    0x03f0, 0xffff, 0x01e0, 0x0780, 0x0fc0, 0xffff, 0x0780, 0x0000
+const struct core_param chords_voic = {
+    ID_VOIC, 1, SLOT_VOIC, 0, (CH_VOICINGS - 1) << 8, 0, 0, -1, -1, -1, 0,
+    "Voicing", fw_str_amp, "VOIC", ch_fmt_voicing, fw_str_empty, 0
 };
 
-const struct core_menu_item chords_menu = { "CHORDS", ch_open, CORE_MENU_ICON, ch_icon };
+struct core_page chords_page = {        /* AMP's third page; core writes view and pos */
+    27, 9, "CHRD", "Chords", { ID_CHRD, ID_VOIC, 0, 0, 0, 0, 0, 0 }, 9, 0, 0
+};
