@@ -13,14 +13,14 @@ needs a new hook in the keyboard's note path (phase 2).
 |---|---|
 | needs | core-dn1 3.3 or newer (parameter slots, mod pages, `fw_pattern`), seq-events |
 | sites | none: `ev_fire_notes`, `ev_key`, three `core_params` and a `core_pages` entry, so its 1.44 port is empty |
-| claims | `param:182`-`184`, `page:27`, and sound slots 26, 65 and 0 (so not with digitables or machines) |
+| claims | `param:182`-`184`, `page:27` (after page 1, the TRIG key's Trig Parameters), and sound slots 26, 65 and 0 (so not with digitables or machines) |
 | RAM | 2.8 KB code |
 | sources | [chords.c](chords.c) (the knobs, the page, the handlers), [chordmath.h](chordmath.h) (the chord math, no firmware) |
 | tests | [tests/test_chords_dn1.py](../../tests/test_chords_dn1.py) |
 
 ## Using it
 
-Press AMP until **Chords (3/3)** shows. Its knobs are the sound's, like any
+Press TRIG (the note page) again: **Chords (2/2)** shows, on the synth tracks. Its knobs are the sound's, like any
 stock knob: saved with the sound, copied with it, and MODE and SHAP
 p-lockable per step.
 

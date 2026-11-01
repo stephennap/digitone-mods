@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /* CHORDS: the Digitone II's keyboard chord modes for the Digitone mk1 and Digitone Keys (core-dn1 3.3,
- * seq-events). Three knobs on a third AMP page, Chords, kept in the sound like any stock knob:
+ * seq-events). Three knobs on the TRIG key's second page, Chords, kept in the sound like any stock knob:
  *   MODE  OFF, or CHORD ROOT, CENTER or SPREAD with BASS OCT 0, -1, -2 or -3 (ROOT, RT-1 ... SP-3)
  *   SHAP  the chord's shape, 0-7; TRIG 1-8 pick it while the page shows
  *   CENT  CENTER POSITION: AUTO (the played note) or C2-C7
@@ -144,8 +144,11 @@ const struct core_param chords_cent = {
     "Center position", fw_str_amp, "CENT", ch_fmt_center, fw_str_empty, 0
 };
 
-struct core_page chords_page = {        /* AMP's third page; core writes view and pos */
-    27, 9, "CHRD", "Chords", { ID_MODE, ID_SHAP, ID_CENT, 0, 0, 0, 0, 0 }, 9, 0, 0
+/* The TRIG key's second page, after page 1, the synth tracks' Trig Parameters (a kind-9 page like
+ * the sound pages: 1.43 builds it at 0x4016ac30). The MIDI tracks' TRIG page, 19, has none.
+ * Core writes view and pos. */
+struct core_page chords_page = {
+    27, 1, "CHRD", "Chords", { ID_MODE, ID_SHAP, ID_CENT, 0, 0, 0, 0, 0 }, 9, 0, 0
 };
 
 /* UI task: while the Chords page shows, TRIG 1-8 pick the active track's shape, as turning SHAP
