@@ -97,6 +97,10 @@ first for the others, kept elsewhere, not found), and the Note Add menu's
 12 chord shapes are 4-byte records at `0x401d3fc5`. The test checks the
 scale masks and the chromatic shapes against them.
 
+**From 0.3 or 0.4:** those kept MODE and BASS OCT combined (0-12) in slot
+26 and CENT in slot 0. On a sound edited with them, 0.5 reads a stale MODE
+or BASS OCT: set both once on the page. CENTER starts at AUTO.
+
 ## Not checked yet
 
 - Not yet run on a unit: the page as drawn, its knobs, TRIG 1-8, the chords

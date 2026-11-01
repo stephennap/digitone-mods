@@ -50,8 +50,10 @@
 #define STEP_LOCKS   160
 
 /* ---- state ------------------------------------------------------------------------------------ */
-static uint8_t ch_center[4];            /* per track: CENTER, 0 AUTO; the project data below */
-static volatile int8_t ch_last[SQ_AUDIO][CH_MAX_TONES];     /* the last chord each track played */
+/* per track: CENTER, 0 AUTO; the project data below, which core copies a long word at a time */
+static uint8_t ch_center[4] __attribute__((aligned(4)));
+/* the last chord each track played, -1 first: none yet (0 would be a note, C-1) */
+static volatile int8_t ch_last[SQ_AUDIO][CH_MAX_TONES] = { { -1 }, { -1 }, { -1 }, { -1 } };
 static void *ch_brain;                  /* the key dispatcher's, from the first key: ev_draw has none */
 static int32_t ch_acc[8];               /* encoder counts short of a detent */
 static uint32_t ch_drawn;               /* what the page last showed, to redraw on a change */
@@ -159,17 +161,24 @@ static void ch_note_name(char *buf, int32_t note)  /* MIDI 60 = C4 */
     *buf = 0;
 }
 
+/* The firmware's formatters: at most 4 characters, as the stock values (OFF, 127, -63), since the
+ * size of the buffer the firmware gives them is not known. The page draws its own, longer names. */
+static const char *const ch_mode_short[MODES] = { "OFF", "ROOT", "CNTR", "SPRD" };
+static const char *const ch_step_short[CH_SHAPES] = {
+    "135", "1357", "1-9", "125", "145", "1356", "1359", "15"
+};
+
 static void ch_fmt_mode(int32_t value, char *buf)
 {
-    ch_text(buf, ch_mode_names[ch_clamp(value >> 8, 0, MODES - 1)]);
+    ch_text(buf, ch_mode_short[ch_clamp(value >> 8, 0, MODES - 1)]);
 }
 
 static void ch_fmt_shape(int32_t value, char *buf)
 {
     uint8_t *pat = fw_pattern;
-    int32_t t = fw_active_track;
-    ch_text(buf, ch_shape_name(value >> 8, pat && t >= 0 && t < SQ_AUDIO ?
-                               FW_TRACK_SCALE(FW_TRACK(pat, t)) : 0));
+    int32_t t = fw_active_track, v = ch_clamp(value >> 8, 0, CH_SHAPES - 1);
+    int chromatic = pat && t >= 0 && t < SQ_AUDIO && FW_TRACK_SCALE(FW_TRACK(pat, t)) < 0;
+    ch_text(buf, chromatic ? ch_semi_names[v] : ch_step_short[v]);
 }
 
 static void ch_fmt_bass(int32_t value, char *buf)
