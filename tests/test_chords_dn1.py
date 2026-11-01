@@ -53,17 +53,17 @@ def masks():
 
 
 # --- a copy of chordmath.h's ch_chord ------------------------------------------------------------
-NINTH = 9                               # the step above the note, an octave up, in any scale
-STEPS = [[0, 2, 4], [0, 2, 4, 6], [0, 2, 4, 6, NINTH], [0, 1, 4], [0, 3, 4], [0, 2, 4, 5],
-         [0, 2, 4, NINTH], [0, 4]]
-SEMIS = [[0, 4, 7], [0, 3, 7], [0, 4, 7, 10], [0, 3, 7, 10], [0, 4, 7, 11], [0, 3, 6], [0, 2, 7],
-         [0, 5, 7]]
+# The Digitone II's SHAPEs (in a scale: steps) and TYPEs (on chromatic: semitones), in its order
+STEPS = [[0, 2, 4], [0, 1, 4], [0, 2], [0, 3], [0, 4], [0, 3, 4], [0, 2, 4, 6], [0, 3, 6]]
+SEMIS = [[0, 4, 7], [0, 3, 7], [0, 4, 7, 10], [0, 3, 7, 10], [0, 4, 7, 11], [0, 3, 6], [0, 3, 6, 9],
+         [0, 2, 7], [0, 5, 7], [0, 4, 7, 9], [0, 3, 7, 9], [0, 2, 4, 7]]
 ROOT, CENTER, SPREAD = range(3)
 
 
 def chord(note, root, scale, shape, mode, center, bass, table):
-    if not 0 <= note <= 127 or not 0 <= shape < 8 or not 0 <= mode < 3:
+    if not 0 <= note <= 127 or shape < 0 or not 0 <= mode < 3:
         return None
+    shape = min(shape, (12 if scale < 0 else 8) - 1)
     if scale < 0:
         tones = [note + s for s in SEMIS[shape]]
     else:
@@ -77,7 +77,7 @@ def chord(note, root, scale, shape, mode, center, bass, table):
         d = deg.index(pc)
         tones = []
         for o in STEPS[shape]:
-            j = d + (k + 1 if o == NINTH else o)
+            j = d + o
             t = note + deg[j % k] - deg[d] + 12 * (j // k)
             if t not in tones:
                 tones.append(t)
@@ -139,8 +139,8 @@ def play(note, shape, mode=ROOT, center=60, bass=0, root=60, scale=0):
 C2, C3, D3, E3, G3, A3, B3 = 36, 48, 50, 52, 55, 57, 59
 C4, D4, E4, F4, G4, A4, B4 = 60, 62, 64, 65, 67, 69, 71
 ION, AEOL, PMIN, WTONE, COMBO, HWDIM, CHROM = 0, 5, 7, 11, 13, 21, -1
-S135, S1357, S13579, S125, S145, S1356, S1359, S15 = range(8)
-MAJ, MIN, SEV, MIN7, MAJ7, DIM, SUS2, SUS4 = range(8)
+S135, S125, S13, S14, S15, S145, S1357, S147 = range(8)
+MAJ, MIN, SEV, MIN7, MAJ7, DIM, DIM7, SUS2, SUS4, SIX, MIN6, ADD9 = range(12)
 
 
 def test_the_manuals_examples():
@@ -158,12 +158,14 @@ def test_bass_oct_adds_a_root_below_or_replaces_it():
 
 
 def test_every_shape_in_a_scale():
-    assert play(C4, S13579) == [C4, E4, G4, B4, D4 + 12]
+    """The Digitone II's eight, on C in C major."""
     assert play(C4, S125) == [C4, D4, G4]
-    assert play(C4, S145) == [C4, F4, G4]
-    assert play(C4, S1356) == [C4, E4, G4, A4]
-    assert play(C4, S1359) == [C4, E4, G4, D4 + 12]
+    assert play(C4, S13) == [C4, E4]
+    assert play(C4, S14) == [C4, F4]
     assert play(C4, S15) == [C4, G4]
+    assert play(C4, S145) == [C4, F4, G4]
+    assert play(C4, S147) == [C4, F4, B4]                       # stacked fourths
+    assert play(D4, S147) == [D4, G4, C4 + 12]
     assert play(C4, S135, scale=AEOL) == [C4, 63, G4]           # C minor
     assert play(B4, S135) == [B4, D4 + 12, F4 + 12]             # B diminished
 
@@ -172,6 +174,15 @@ def test_chromatic_shapes_are_chord_types():
     assert play(61, MAJ, scale=CHROM) == [61, 65, 68]
     assert play(C4, MIN7, scale=CHROM) == [C4, 63, G4, 70]
     assert play(C4, SUS4, scale=CHROM) == [C4, F4, G4]
+    assert play(C4, DIM7, scale=CHROM) == [C4, 63, 66, A4]
+    assert play(C4, SIX, scale=CHROM) == [C4, E4, G4, A4]
+    assert play(C4, MIN6, scale=CHROM) == [C4, 63, G4, A4]
+    assert play(C4, ADD9, scale=CHROM) == [C4, D4, E4, G4]
+
+
+def test_a_type_past_a_scales_shapes_is_its_last_shape():
+    """SHAPE keeps the knob's value when SCALE changes: a TYPE 9-12 is 1-4-7 in a scale."""
+    assert play(C4, ADD9) == play(C4, S147)
 
 
 def test_center_keeps_the_hand_in_place():
@@ -247,23 +258,18 @@ def test_every_scale_makes_chords():
         assert play(C4, S135, scale=scale) is not None, scale
 
 
-def test_the_ninth_is_the_second_an_octave_up_in_any_scale():
-    # 7 notes: Cmaj9's D5
-    assert play(C4, S13579)[-1] == D4 + 12
-    # 8 notes (Combo Minor C D Eb F G Ab Bb B): the 9th is D, not the octave C
-    assert play(C4, S1359, scale=COMBO) == [C4, 63, G4, D4 + 12]
-    # Half-Whole Diminished (C Db Eb E F# G A Bb): C dim7 and its b9, Db
-    assert play(C4, S13579, scale=HWDIM) == [C4, 63, 66, A4, 61 + 12]
-    # 6 notes (Whole Tone C D E F# G# Bb): the 9th is D, not E again
-    assert play(C4, S1359, scale=WTONE) == [C4, E4, 68, D4 + 12]
-    # 5 notes: a 7th and 9th that land on the same note are kept once
-    r = play(C4, S13579, scale=PMIN)
-    assert r is not None and len(r) == len(set(r)) == 4
+def test_other_scale_sizes():
+    # Half-Whole Diminished (C Db Eb E F# G A Bb): 1-3-5-7 is C dim7
+    assert play(C4, S1357, scale=HWDIM) == [C4, 63, 66, A4]
+    # Whole Tone (C D E F# G# Bb): 1-3-5 is C augmented
+    assert play(C4, S135, scale=WTONE) == [C4, E4, 68]
+    # Pentatonic Minor (C Eb F G Bb): 1-3-5-7 stacks its own steps, the 7th the 2nd an octave up
+    assert play(C4, S1357, scale=PMIN) == [C4, F4, 70, 63 + 12]
 
 
 def test_small_scales_keep_each_note_once():
     for mode in (CENTER, SPREAD):
-        r = play(C4, S13579, mode, C4, scale=PMIN)
+        r = play(C4, S1357, mode, C4, scale=PMIN)
         assert r is not None and len(set(t % 12 for t in r)) == len(r)
 
 
@@ -272,7 +278,7 @@ def test_every_chord_is_safe_for_the_firmware():
     t = masks()
     for scale in range(-1, 35):
         for note in range(0, 128, 1):
-            for shape in range(8):
+            for shape in range(12):
                 for mode in range(3):
                     for center in (36, 60, 96) if mode else (60,):
                         for bass in range(4):
@@ -314,11 +320,24 @@ def test_header_masks_match_the_os_mode_table():
 
 
 def test_chromatic_types_are_the_os_chord_shapes():
-    """MAJ ... SUS4 are the Note Add menu's own shapes 0-5, 7 and 8."""
+    """The 12 TYPEs, MAJ ... ADD9, are the mk1's Note Add shapes in order (and the Digitone II's
+    own table, 1.12: 0x4020e235, is the same bytes)."""
     img = stock_image()
     os_shapes = [[b for b in img[SHAPES_143 - LOAD + 4 * k:SHAPES_143 - LOAD + 4 * k + 4] if b != 0xff]
                  for k in range(12)]
-    assert SEMIS == [os_shapes[k] for k in (0, 1, 2, 3, 4, 5, 7, 8)], os_shapes
+    assert SEMIS == os_shapes, os_shapes
+
+
+def test_header_tables_match_this_copy():
+    """chordmath.h's shape and type tables are the ones this file tests."""
+    src = open(HDR).read()
+    def table(name):
+        body = src[src.index(name):]
+        body = body[body.index('{') + 1:body.index('};')]
+        rows = re.findall(r'\{([^}]*)\}', body)
+        return [[int(x) for x in r.split(',') if x.strip() and int(x) >= 0] for r in rows]
+    assert table('ch_shape_steps[CH_SHAPES]') == STEPS
+    assert table('ch_type_semis[CH_TYPES]') == SEMIS
 
 
 def stock_image():

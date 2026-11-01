@@ -54,32 +54,43 @@ static const uint16_t ch_scale_mask[CH_SCALES] = {
 };
 #undef M
 
-/* SHAPE, 0-7 (TRIG 1-8). In a scale: the scale steps from the played note (0 the note, 2 a third up
- * the scale, ...), so the chord is the scale's own; CH_NINTH is the 9th, the step above the note an
- * octave up, in a scale of any size (in a 7-note scale, 8 steps). With SCALE on chromatic: a chord
- * type, in semitones. -1 ends a list. */
-#define CH_SHAPES 8
-#define CH_NINTH  9
-static const int8_t ch_shape_steps[CH_SHAPES][6] = {
+/* SHAPE, as the Digitone II offers it (its OS 1.12's names at 0x402a1348, in this order). In a scale,
+ * the shapes are scale degrees: the steps from the played note (0 the note, 2 a third up the scale,
+ * ...), so the chord is the scale's own; TRIG 1-8 pick them. With SCALE on chromatic, TYPE: a chord
+ * type in semitones, the Digitone II's 12 (0x4020e235), which are the mk1's own Note Add shapes
+ * (1.43: 0x401d3fc5) byte for byte; tests/test_chords_dn1.py checks them. -1 ends a list. */
+#define CH_SHAPES 8                     /* in a scale: 1-3-5 ... 1-4-7 */
+#define CH_TYPES  12                    /* on chromatic: MAJ ... ADD9 */
+static const int8_t ch_shape_steps[CH_SHAPES][5] = {
     { 0, 2, 4, -1 },                    /* 1-3-5 */
-    { 0, 2, 4, 6, -1 },                 /* 1-3-5-7 */
-    { 0, 2, 4, 6, CH_NINTH, -1 },       /* 1-3-5-7-9 */
     { 0, 1, 4, -1 },                    /* 1-2-5 */
-    { 0, 3, 4, -1 },                    /* 1-4-5 */
-    { 0, 2, 4, 5, -1 },                 /* 1-3-5-6 */
-    { 0, 2, 4, CH_NINTH, -1 },          /* 1-3-5-9 */
+    { 0, 2, -1 },                       /* 1-3 */
+    { 0, 3, -1 },                       /* 1-4 */
     { 0, 4, -1 },                       /* 1-5 */
+    { 0, 3, 4, -1 },                    /* 1-4-5 */
+    { 0, 2, 4, 6, -1 },                 /* 1-3-5-7 */
+    { 0, 3, 6, -1 },                    /* 1-4-7 */
 };
-static const int8_t ch_shape_semis[CH_SHAPES][6] = {
+static const int8_t ch_type_semis[CH_TYPES][5] = {
     { 0, 4, 7, -1 },                    /* MAJ */
     { 0, 3, 7, -1 },                    /* MIN */
     { 0, 4, 7, 10, -1 },                /* 7TH */
     { 0, 3, 7, 10, -1 },                /* MIN7 */
     { 0, 4, 7, 11, -1 },                /* MAJ7 */
     { 0, 3, 6, -1 },                    /* DIM */
+    { 0, 3, 6, 9, -1 },                 /* DIM7 */
     { 0, 2, 7, -1 },                    /* SUS2 */
     { 0, 5, 7, -1 },                    /* SUS4 */
+    { 0, 4, 7, 9, -1 },                 /* 6 */
+    { 0, 3, 7, 9, -1 },                 /* MIN6 */
+    { 0, 2, 4, 7, -1 },                 /* ADD9 */
 };
+
+/* How many shapes SCALE offers: the types on chromatic, else the shapes. */
+static int32_t ch_shape_count(int32_t scale)
+{
+    return scale < 0 ? CH_TYPES : CH_SHAPES;
+}
 
 /* MODE: how the chord's notes are placed. */
 enum { CH_ROOT, CH_CENTER, CH_SPREAD, CH_MODES };
@@ -96,7 +107,8 @@ static void ch_sort(int32_t *t, int32_t n)
 }
 
 /* The chord a single played note makes, as the firmware's notes. note: a MIDI note 0-127; root: the
- * keyboard's ROOT (a MIDI note); scale: -1 chromatic, else 0-34; shape: 0-7; mode: CH_ROOT,
+ * keyboard's ROOT (a MIDI note); scale: -1 chromatic, else 0-34; shape: a TYPE (0-11) on chromatic,
+ * else a SHAPE (0-7), clamped to SCALE's count; mode: CH_ROOT,
  * CH_CENTER or CH_SPREAD; center: CENTER POSITION, a MIDI note; bass: BASS OCT, 0 none or 1-3
  * octaves below the chord's root. -> how many of notes[] it wrote (notes[0] the lowest, the rest
  * intervals above it, each 1-127), or 0: play as stock (a SCALE out of range, a note outside the
@@ -106,13 +118,15 @@ static int32_t ch_chord(int32_t note, int32_t root, int32_t scale, int32_t shape
 {
     int32_t tones[CH_MAX_TONES], n = 0, r = 0, i, j;
 
-    if (note < 0 || note > 127 || shape < 0 || shape >= CH_SHAPES || mode < 0 || mode >= CH_MODES)
+    if (note < 0 || note > 127 || shape < 0 || mode < 0 || mode >= CH_MODES)
         return 0;
+    if (shape >= ch_shape_count(scale))
+        shape = ch_shape_count(scale) - 1;
 
     /* the chord in root position, tones[0] its root */
     if (scale < 0) {
-        for (i = 0; ch_shape_semis[shape][i] >= 0; i++)
-            tones[n++] = note + ch_shape_semis[shape][i];
+        for (i = 0; ch_type_semis[shape][i] >= 0; i++)
+            tones[n++] = note + ch_type_semis[shape][i];
     } else {
         int32_t deg[12], k = 0, d = -1, pc, s;
         uint32_t mask;
@@ -129,9 +143,9 @@ static int32_t ch_chord(int32_t note, int32_t root, int32_t scale, int32_t shape
             return 0;
         for (i = 0; ch_shape_steps[shape][i] >= 0; i++) {
             int32_t t, dup = 0;
-            j = d + (ch_shape_steps[shape][i] == CH_NINTH ? k + 1 : ch_shape_steps[shape][i]);
+            j = d + ch_shape_steps[shape][i];
             t = note + deg[j % k] - deg[d] + 12 * (j / k);
-            for (s = 0; s < n; s++)     /* a small scale's 7th can be its 9th: keep it once */
+            for (s = 0; s < n; s++)     /* each pitch once */
                 if (tones[s] == t)
                     dup = 1;
             if (!dup)

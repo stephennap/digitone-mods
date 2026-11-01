@@ -104,7 +104,7 @@ void chords_notes(int32_t track, int32_t step, int8_t notes[SQ_NOTES])
             info.root != SQ_ROOT_NONE) {
             c = ch_center[track];
             center = c ? CENT_BASE + c : notes[0];
-            n = ch_chord(notes[0], info.root, info.scale, ch_value(track, step, SLOT_SHAP, CH_SHAPES - 1),
+            n = ch_chord(notes[0], info.root, info.scale, ch_value(track, step, SLOT_SHAP, CH_TYPES - 1),
                          mode - 1, center, ch_value(track, step, SLOT_BASS, BASSES - 1), out);
             if (n > 0)
                 for (i = 0; i < SQ_NOTES; i++)
@@ -123,11 +123,12 @@ static void ch_text(char *buf, const char *s)
 }
 
 static const char *const ch_mode_names[MODES] = { "OFF", "ROOT", "CENTER", "SPREAD" };
+/* The Digitone II's own names and order (its OS 1.12: 0x402a1348, 0x401d5808). */
 static const char *const ch_step_names[CH_SHAPES] = {
-    "1-3-5", "1-3-5-7", "13579", "1-2-5", "1-4-5", "1-3-5-6", "1-3-5-9", "1-5"
+    "1-3-5", "1-2-5", "1-3", "1-4", "1-5", "1-4-5", "1-3-5-7", "1-4-7"
 };
-static const char *const ch_semi_names[CH_SHAPES] = {
-    "MAJ", "MIN", "7TH", "MIN7", "MAJ7", "DIM", "SUS2", "SUS4"
+static const char *const ch_semi_names[CH_TYPES] = {
+    "MAJ", "MIN", "7TH", "MIN7", "MAJ7", "DIM", "DIM7", "SUS2", "SUS4", "6", "MIN6", "ADD9"
 };
 /* The OS's own short scale names (1.43: the name table at 0x40241cd0, entries 36-71), SCALE -1 first. */
 static const char *const ch_scale_names[SCALE_MAX + 2] = {
@@ -144,7 +145,7 @@ static int32_t ch_clamp(int32_t v, int32_t lo, int32_t hi)
 
 static const char *ch_shape_name(int32_t v, int32_t scale)
 {
-    v = ch_clamp(v, 0, CH_SHAPES - 1);
+    v = ch_clamp(v, 0, ch_shape_count(scale) - 1);
     return scale < 0 ? ch_semi_names[v] : ch_step_names[v];
 }
 
@@ -168,7 +169,7 @@ static void ch_note_name(char *buf, int32_t note)
  * size of the buffer the firmware gives them is not known. The page draws its own, longer names. */
 static const char *const ch_mode_short[MODES] = { "OFF", "ROOT", "CNTR", "SPRD" };
 static const char *const ch_step_short[CH_SHAPES] = {
-    "135", "1357", "1-9", "125", "145", "1356", "1359", "15"
+    "135", "125", "13", "14", "15", "145", "1357", "147"
 };
 
 static void ch_fmt_mode(int32_t value, char *buf)
@@ -179,8 +180,9 @@ static void ch_fmt_mode(int32_t value, char *buf)
 static void ch_fmt_shape(int32_t value, char *buf)
 {
     uint8_t *pat = fw_pattern;
-    int32_t t = fw_active_track, v = ch_clamp(value >> 8, 0, CH_SHAPES - 1);
+    int32_t t = fw_active_track, v = value >> 8;
     int chromatic = pat && t >= 0 && t < SQ_AUDIO && FW_TRACK_SCALE(FW_TRACK(pat, t)) < 0;
+    v = ch_clamp(v, 0, (chromatic ? CH_TYPES : CH_SHAPES) - 1);
     ch_text(buf, chromatic ? ch_semi_names[v] : ch_step_short[v]);
 }
 
@@ -199,7 +201,7 @@ const struct core_param chords_mode = {
     "Chord mode", fw_str_amp, "MODE", ch_fmt_mode, fw_str_empty, 0
 };
 const struct core_param chords_shap = {
-    ID_SHAP, 1, SLOT_SHAP, 0, (CH_SHAPES - 1) << 8, 0, 0, -1, -1, -1, 0,
+    ID_SHAP, 1, SLOT_SHAP, 0, (CH_TYPES - 1) << 8, 0, 0, -1, -1, -1, 0,
     "Chord shape", fw_str_amp, "SHAP", ch_fmt_shape, fw_str_empty, 0
 };
 const struct core_param chords_bass = {
@@ -234,11 +236,11 @@ static int ch_view(struct ch_view *v)
     trk = FW_TRACK(pat, t);
     v->track = t;
     v->mode = ch_clamp(FW_SOUND_SLOT(kit, t, SLOT_MODE) >> 8, 0, MODES - 1);
-    v->shape = ch_clamp(FW_SOUND_SLOT(kit, t, SLOT_SHAP) >> 8, 0, CH_SHAPES - 1);
+    v->scale = FW_TRACK_SCALE(trk);
+    v->shape = ch_clamp(FW_SOUND_SLOT(kit, t, SLOT_SHAP) >> 8, 0, ch_shape_count(v->scale) - 1);
     v->bass = ch_clamp(FW_SOUND_SLOT(kit, t, SLOT_BASS) >> 8, 0, BASSES - 1);
     v->center = ch_center[t];
     v->root = ch_clamp(FW_TRACK_ROOT(trk), 0, 127);
-    v->scale = FW_TRACK_SCALE(trk);
     for (i = 0; i < CH_MAX_TONES; i++)
         v->last[i] = ch_last[t][i];
     return 1;
@@ -345,7 +347,7 @@ int32_t chords_enc(void *brain, void *ev)
         trk[0x3ce] = (uint8_t)(int8_t)ch_clamp(v.scale + d, -1, SCALE_MAX);
         break;
     case 8:
-        core_sound_set(v.track, SLOT_SHAP, ch_clamp(v.shape + d, 0, CH_SHAPES - 1) << 8);
+        core_sound_set(v.track, SLOT_SHAP, ch_clamp(v.shape + d, 0, ch_shape_count(v.scale) - 1) << 8);
         break;
     }
     return 1;

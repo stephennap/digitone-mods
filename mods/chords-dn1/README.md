@@ -43,7 +43,7 @@ CENTER   C5     DOR   1-3-5
 | E | MODE | OFF, CHORD ROOT, CHORD CENTER, CHORD SPREAD | the sound |
 | F | ROOT | the track's keyboard ROOT, a note | the pattern (the stock setting itself) |
 | G | SCALE | the track's keyboard SCALE, by the OS's short names (CHRO, ION, DOR ...) | the pattern (the stock setting itself) |
-| H | SHAPE | 8 shapes, **TRIG 1-8** too: in a scale 1-3-5, 1-3-5-7, 13579, 1-2-5, 1-4-5, 1-3-5-6, 1-3-5-9, 1-5; on chromatic MAJ, MIN, 7TH, MIN7, MAJ7, DIM, SUS2, SUS4 | the sound |
+| H | SHAPE / TYPE | the Digitone II's, in its order: in a scale 8 shapes, 1-3-5, 1-2-5, 1-3, 1-4, 1-5, 1-4-5, 1-3-5-7, 1-4-7 (**TRIG 1-8** too); on chromatic 12 types, MAJ, MIN, 7TH, MIN7, MAJ7, DIM, DIM7, SUS2, SUS4, 6, MIN6, ADD9 | the sound |
 
 The keyboard shows two octaves with a dot on each note of the last chord
 the track played. Notes are named as the Digitone names them: MIDI 60 is C5.
@@ -66,12 +66,13 @@ the track played. Notes are named as the Digitone names them: MIDI 60 is C5.
   the root: C4 on 1-3-5-7 at -1 plays C3 E4 G4 B4.
 
 In a scale the chords are the scale's own: its notes stacked from the played
-one, so in a major key the 7th chords are Imaj7, ii m7, iii m7, IVmaj7, V7,
-vi m7 and vii m7b5, and in harmonic minor the tonic is m(maj7) and the
-leading tone dim7. The 9 is always the scale's next note above the root, an
-octave up. In a scale of 5 or 6 notes there is no 6th or 7th step: those
-shapes run on into the next octave (the root or the 2nd again), and a note
-that comes twice is played once.
+one, so in a major key 1-3-5-7 gives Imaj7, ii m7, iii m7, IVmaj7, V7, vi m7
+and vii m7b5, and in harmonic minor the tonic is m(maj7) and the leading tone
+dim7. In a scale of 5 or 6 notes there is no 7th step: 1-3-5-7 runs on into
+the next octave. With SCALE on chromatic the 12 types are the Digitone's own
+Note Add chords (the mk1's table and the Digitone II's are the same bytes).
+SHAPE keeps its value when SCALE changes: a type past the 8th is 1-4-7 in a
+scale.
 
 It plays as stock when it cannot say: a trig that already holds a chord, a
 note outside the scale, or a chord that would leave the MIDI range.
