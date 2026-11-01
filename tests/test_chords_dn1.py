@@ -1,9 +1,9 @@
 """CHORDS (mods/chords-dn1): its scale table against the Digitone's own, and its chord rules.
 
     python tests/test_chords_dn1.py                                  # the chord rules
-    ELEKLOADER_DN_SYX=Digitone_..._OS1.43.syx python tests/test_chords_dn1.py   # and the scales
+    ELEKLOADER_DN_SYX=Digitone_..._OS1.43.syx python tests/test_chords_dn1.py   # and the OS tables
 
-The chord rules run on a Python copy of chordmath.h's ch_build (this machine may have no host C
+The chord rules run on a Python copy of chordmath.h's ch_chord (this machine may have no host C
 compiler); keep the two in step. The scale check reads the masks from chordmath.h itself.
 """
 import os
@@ -16,8 +16,9 @@ from elekloader import devices, formats  # noqa: E402
 HERE = os.path.dirname(__file__)
 HDR = os.path.join(HERE, '..', 'mods', 'chords-dn1', 'chordmath.h')
 SYX = os.environ.get('ELEKLOADER_DN_SYX', '')
-SCALES_143 = 0x401d3ed0                 # 35 records of 7 bytes; -1 first: not a 7-note scale
 LOAD = 0x40000400
+SCALES_143 = 0x401d3ed0                 # 35 records of 7 bytes; 0xff first: not a 7-note scale
+SHAPES_143 = 0x401d3fc5                 # the Note Add menu's chord shapes, 4 bytes each, 0xff unused
 
 
 class Skip(Exception):
@@ -31,249 +32,186 @@ def masks():
     body = body[body.index('{') + 1:body.index('};')]
     out = []
     for line in body.splitlines():
-        line = re.sub(r'/\*.*?\*/', '', line).strip()
+        line = re.sub(r'/\*.*?\*/', '', line).strip().rstrip(',')
         if not line:
             continue
-        line = line.rstrip(',')
         m = 0
-        for part in line.split('|'):
-            part = part.strip()
+        for part in (p.strip() for p in line.split('|')):
             g = re.fullmatch(r'M\(([\d,\s]+)\)', part)
+            h = re.fullmatch(r'\(1u << (\d+)\)', part)
             if g:
                 for n in g.group(1).split(','):
                     m |= 1 << int(n)
-            elif re.fullmatch(r'\(1u << (\d+)\)', part):
-                m |= 1 << int(re.fullmatch(r'\(1u << (\d+)\)', part).group(1))
-            elif part == '0':
-                pass
-            else:
+            elif h:
+                m |= 1 << int(h.group(1))
+            elif part != '0':
                 raise AssertionError('cannot read %r' % part)
         out.append(m)
     assert len(out) == 35, len(out)
     return out
 
 
-# --- a copy of chordmath.h ---------------------------------------------------------------------
-DEGREES = [None, [0, 2, 4], [0, 1, 4], [0, 3, 4], [0, 2, 4, 5], [0, 2, 4, 6], [0, 2, 4, 6, 8],
-           [0, 2, 4, 8]]
-CHROMATIC = [None, [0, 4, 7], [0, 2, 7], [0, 5, 7], [0, 4, 7, 9], [0, 4, 7, 10], [0, 4, 7, 10, 14],
-             [0, 4, 7, 14]]
-OFF, TRIAD, SUS2, SUS4, SIXTH, SEVENTH, NINTH, ADD9 = range(8)
-CLOSE, INV1, INV2, INV3, OPEN = range(5)
+# --- a copy of chordmath.h's ch_chord ------------------------------------------------------------
+STEPS = [[0, 2, 4], [0, 2, 4, 6], [0, 2, 4, 6, 8], [0, 1, 4], [0, 3, 4], [0, 2, 4, 5], [0, 2, 4, 8],
+         [0, 4]]
+SEMIS = [[0, 4, 7], [0, 3, 7], [0, 4, 7, 10], [0, 3, 7, 10], [0, 4, 7, 11], [0, 3, 6], [0, 2, 7],
+         [0, 5, 7]]
+ROOT, CENTER, SPREAD = range(3)
 
 
-def degree(note, root, scale, table):
-    if not 0 <= scale < 35 or not table[scale]:
-        return None, None
-    deg = [s for s in range(12) if table[scale] >> s & 1]
-    pc = (note - root) % 12
-    return (deg, deg.index(pc)) if pc in deg else (None, None)
-
-
-def build(note, root, scale, typ, voicing, table):
-    if not 0 <= note <= 127 or not OFF < typ < 8:
+def chord(note, root, scale, shape, mode, center, bass, table):
+    if not 0 <= note <= 127 or not 0 <= shape < 8 or not 0 <= mode < 3:
         return None
     if scale < 0:
-        tones = [note + s for s in CHROMATIC[typ]]
+        tones = [note + s for s in SEMIS[shape]]
     else:
-        deg, d = degree(note, root, scale, table)
-        if deg is None:
+        if scale >= 35 or not table[scale]:
             return None
+        deg = [s for s in range(12) if table[scale] >> s & 1]
         k = len(deg)
-        tones = [note + deg[(d + o) % k] - deg[d] + 12 * ((d + o) // k) for o in DEGREES[typ]]
-    return voice(tones, voicing)
-
-
-STEP_OF = [0, 1, 1, 2, 2, 3, 4, 4, 5, 5, 6, 6]
-
-
-def follow(stored, root, scale, voicing, table):
-    """stored: the trig's 8 bytes, the note then intervals (0 none)."""
-    note = stored[0]
-    if note < 0:
-        return None
-    deg, d = degree(note, root, scale, table)
-    if deg is None or len(deg) != 7:
-        return None
-    tones = [note]
-    for iv in stored[1:]:
-        if not iv:
-            continue
-        if iv < 0:
+        pc = (note - root) % 12
+        if pc not in deg:
             return None
-        j = d + STEP_OF[iv % 12]
-        tones.append(note + deg[j % 7] - deg[d] + 12 * (j // 7) + 12 * (iv // 12))
+        d = deg.index(pc)
+        tones = [note + deg[(d + o) % k] - deg[d] + 12 * ((d + o) // k) for o in STEPS[shape]]
+    if mode != ROOT:
+        placed, r = [], None
+        for i, t in enumerate(tones):
+            t = center + (t - center) % 12
+            if t > center + 6:
+                t -= 12
+            if i == 0:
+                r = t
+            if t not in placed:
+                placed.append(t)
+        tones = sorted(placed)
+        if mode == SPREAD:
+            tones = [t + 12 if i % 2 else t for i, t in enumerate(tones)]
+    else:
+        r = tones[0]
     tones.sort()
-    return voice(tones, voicing)
-
-
-def voice(tones, voicing):
-    tones = list(tones)
+    if bass > 0:
+        at = next((i for i, t in enumerate(tones) if t % 12 == r % 12), None)
+        if at is None:
+            return None
+        b = tones[at] - 12 * bass
+        while b >= tones[0]:
+            b -= 12
+        if b >= 0:
+            if len(tones) > 3:
+                del tones[at]
+            tones = [b] + tones
     if not 2 <= len(tones) <= 8:
         return None
-    if INV1 <= voicing <= INV3:
-        for i in range(min(voicing, len(tones) - 1)):
-            tones[i] += 12
-    elif voicing == OPEN and len(tones) >= 3:
-        tones[1] += 12
-    tones.sort()
     while tones[-1] > 127 and tones[0] >= 12:
         tones = [t - 12 for t in tones]
-    if tones[-1] > 127 or len(set(tones)) != len(tones):
+    if tones[0] < 0 or tones[-1] > 127 or len(set(tones)) != len(tones):
         return None
     return [tones[0]] + [t - tones[0] for t in tones[1:]]
 # ------------------------------------------------------------------------------------------------
 
 
-def names(r):
-    """notes[] -> absolute MIDI notes."""
-    return [r[0]] + [r[0] + i for i in r[1:]]
+def play(note, shape, mode=ROOT, center=60, bass=0, root=60, scale=0):
+    r = chord(note, root, scale, shape, mode, center, bass, masks())
+    return None if r is None else [r[0]] + [r[0] + i for i in r[1:]]
 
 
-C4, D4, E4, G4, B4 = 60, 62, 64, 67, 71
-ION, AEOL, PMIN, BLUES, COMBO = 0, 5, 7, 12, 13
+C2, C3, D3, E3, G3, A3, B3 = 36, 48, 50, 52, 55, 57, 59
+C4, D4, E4, F4, G4, A4, B4 = 60, 62, 64, 65, 67, 69, 71
+ION, AEOL, PMIN, COMBO, CHROM = 0, 5, 7, 13, -1
+S135, S1357, S13579, S125, S145, S1356, S1359, S15 = range(8)
+MAJ, MIN, SEV, MIN7, MAJ7, DIM, SUS2, SUS4 = range(8)
 
 
-def test_major_key_triads_follow_the_scale():
-    t = masks()
-    assert names(build(C4, C4, ION, TRIAD, CLOSE, t)) == [60, 64, 67]     # C E G
-    assert names(build(D4, C4, ION, TRIAD, CLOSE, t)) == [62, 65, 69]     # D F A: minor
-    assert names(build(B4, C4, ION, TRIAD, CLOSE, t)) == [71, 74, 77]     # B D F: diminished
+def test_the_manuals_examples():
+    """ROOT C, SCALE Ionian: C on 1-3-5 is C E G, D is D F A, C on 1-3-5-7 is C E G B."""
+    assert play(C4, S135) == [C4, E4, G4]
+    assert play(D4, S135) == [D4, F4, A4]
+    assert play(C4, S1357) == [C4, E4, G4, B4]
 
 
-def test_minor_key_and_sevenths():
-    t = masks()
-    assert names(build(C4, C4, AEOL, TRIAD, CLOSE, t)) == [60, 63, 67]    # C Eb G
-    assert names(build(G4, C4, ION, SEVENTH, CLOSE, t)) == [67, 71, 74, 77]   # G7
-    assert names(build(C4, C4, ION, NINTH, CLOSE, t)) == [60, 64, 67, 71, 74]  # Cmaj9
+def test_bass_oct_adds_a_root_below_or_replaces_it():
+    """C3 on 1-3-5, BASS -1: C2 C3 E3 G3. C3 on 1-3-5-7, BASS -1: C2 E3 G3 B3."""
+    assert play(C3, S135, bass=1, root=C3) == [C2, C3, E3, G3]
+    assert play(C3, S1357, bass=1, root=C3) == [C2, E3, G3, B3]
+    assert play(C3, S135, bass=2, root=C3) == [C3 - 24, C3, E3, G3]
 
 
-def test_root_in_another_octave_and_key():
-    t = masks()
-    # D major (ROOT D3 = 50): E plays E G B, a minor chord
-    assert names(build(E4, 50, ION, TRIAD, CLOSE, t)) == [64, 67, 71]
+def test_every_shape_in_a_scale():
+    assert play(C4, S13579) == [C4, E4, G4, B4, D4 + 12]
+    assert play(C4, S125) == [C4, D4, G4]
+    assert play(C4, S145) == [C4, F4, G4]
+    assert play(C4, S1356) == [C4, E4, G4, A4]
+    assert play(C4, S1359) == [C4, E4, G4, D4 + 12]
+    assert play(C4, S15) == [C4, G4]
+    assert play(C4, S135, scale=AEOL) == [C4, 63, G4]           # C minor
+    assert play(B4, S135) == [B4, D4 + 12, F4 + 12]             # B diminished
 
 
-def test_voicings():
-    t = masks()
-    assert names(build(C4, C4, ION, TRIAD, INV1, t)) == [64, 67, 72]      # E G C
-    assert names(build(C4, C4, ION, TRIAD, INV2, t)) == [67, 72, 76]      # G C E
-    assert names(build(C4, C4, ION, TRIAD, INV3, t)) == [67, 72, 76]      # a triad stops at INV 2
-    assert names(build(C4, C4, ION, SEVENTH, INV3, t)) == [71, 72, 76, 79]
-    assert names(build(C4, C4, ION, TRIAD, OPEN, t)) == [60, 67, 76]      # C G E
+def test_chromatic_shapes_are_chord_types():
+    assert play(61, MAJ, scale=CHROM) == [61, 65, 68]
+    assert play(C4, MIN7, scale=CHROM) == [C4, 63, G4, 70]
+    assert play(C4, SUS4, scale=CHROM) == [C4, F4, G4]
 
 
-def test_five_note_scale_stacks_its_own_degrees():
-    t = masks()
-    # C minor pentatonic C Eb F G Bb: every other degree from C is C F Bb
-    assert names(build(C4, C4, PMIN, TRIAD, CLOSE, t)) == [60, 65, 70]
+def test_center_keeps_the_hand_in_place():
+    """With CENTER at C4 each note takes the octave within C4-5 .. C4+6, so chords change by
+    inversion around C4 rather than climbing the keys."""
+    assert play(C4, S135, CENTER, C4) == [G3, C4, E4]           # C as G C E
+    assert play(G4, S135, CENTER, C4) == [G3, B3, D4]           # G in root position
+    assert play(A4, S135, CENTER, C4) == [A3, C4, E4]           # Am as A C E
+    assert play(F4, S135, CENTER, C4) == [A3, C4, F4]           # F as A C F
+    assert play(F4 - 24, S135, CENTER, C4) == [A3, C4, F4]      # the played octave does not matter
+    every = [play(n, S135, CENTER, C4) for n in (C4, D4, E4, F4, G4, A4, B4)]
+    assert all(C4 - 5 <= t <= C4 + 6 for ch in every for t in ch)
+
+
+def test_spread_lifts_every_second_note():
+    # CENTER's G3 C4 E4 with the second note up: G3 E4 C5
+    assert play(C4, S135, SPREAD, C4) == [G3, E4, C4 + 12]
+    # CENTER's G3 B3 C4 E4: G3 C4 B4 E5
+    assert play(C4, S1357, SPREAD, C4) == [G3, C4, B4, E4 + 12]
+
+
+def test_bass_under_center_and_spread():
+    # G on 1-3-5 centered at C4 is G3 B3 D4; BASS -1 adds G2 under it
+    assert play(G4, S135, CENTER, C4, bass=1) == [G3 - 12, G3, B3, D4]
+    # G7 is 4 notes, so the bass takes the root's place: G2 B3 D4 F4
+    assert play(G4, S1357, CENTER, C4, bass=1) == [G3 - 12, B3, D4, F4]
+    # SPREAD: the bass goes under the lowest note, whatever got lifted
+    assert play(C4, S135, SPREAD, C4, bass=1) == [C3, G3, E4, C4 + 12]
 
 
 def test_stock_when_it_cannot_say():
-    t = masks()
-    assert build(61, C4, ION, TRIAD, CLOSE, t) is None                    # C# is not in C major
-    assert build(C4, C4, COMBO, TRIAD, CLOSE, t) is None                  # a scale it does not know
-    assert build(C4, C4, ION, OFF, CLOSE, t) is None
+    assert play(61, S135) is None                               # C# is not in C major
+    assert play(C4, S135, scale=COMBO) is None                  # a scale it does not know
 
 
-def test_chromatic_uses_fixed_shapes():
-    t = masks()
-    assert names(build(61, C4, -1, TRIAD, CLOSE, t)) == [61, 65, 68]      # C# major
-    assert names(build(C4, C4, -1, SEVENTH, CLOSE, t)) == [60, 64, 67, 70]
-
-
-# The Note Add menu's shapes (1.43: 0x401d3fc5, 4 bytes each, -1 unused): MAJOR, MINOR, DOM. 7TH,
-# MINOR 7TH, MAJOR 7TH, DIMINISHED, DIM. 7TH, then five more.
-MENU_SHAPES = [[0, 4, 7], [0, 3, 7], [0, 4, 7, 10], [0, 3, 7, 10], [0, 4, 7, 11], [0, 3, 6],
-               [0, 3, 6, 9], [0, 2, 7], [0, 5, 7], [0, 4, 7, 9], [0, 3, 7, 9], [0, 2, 4, 7]]
-
-
-def stored(note, shape):
-    return [note] + shape[1:] + [0] * (8 - len(shape))
-
-
-def test_key_makes_menu_chords_diatonic():
-    t = masks()
-    major, minor, dom7 = MENU_SHAPES[0], MENU_SHAPES[1], MENU_SHAPES[2]
-    # a MAJOR shape on each degree of C major plays that degree's own triad
-    assert names(follow(stored(C4, major), C4, ION, CLOSE, t)) == [60, 64, 67]   # C
-    assert names(follow(stored(D4, major), C4, ION, CLOSE, t)) == [62, 65, 69]   # Dm
-    assert names(follow(stored(B4, major), C4, ION, CLOSE, t)) == [71, 74, 77]   # Bdim
-    # MINOR in C major on C still plays C major: the key decides
-    assert names(follow(stored(C4, minor), C4, ION, CLOSE, t)) == [60, 64, 67]
-    # DOM. 7TH on G in C major is G7; on C it is Cmaj7
-    assert names(follow(stored(G4, dom7), C4, ION, CLOSE, t)) == [67, 71, 74, 77]
-    assert names(follow(stored(C4, dom7), C4, ION, CLOSE, t)) == [60, 64, 67, 71]
-    # in C minor a MAJOR shape on C plays C minor
-    assert names(follow(stored(C4, major), C4, AEOL, CLOSE, t)) == [60, 63, 67]
-
-
-def test_key_keeps_the_chords_octaves_and_takes_a_voicing():
-    t = masks()
-    # a hand-made chord with its third an octave up: C, G, E' stays spread
-    assert names(follow([C4, 7, 16, 0, 0, 0, 0, 0], C4, ION, CLOSE, t)) == [60, 67, 76]
-    assert names(follow(stored(D4, MENU_SHAPES[0]), C4, ION, INV1, t)) == [65, 69, 74]
-
-
-def test_key_leaves_what_it_cannot_place():
-    t = masks()
-    assert follow(stored(61, MENU_SHAPES[0]), C4, ION, CLOSE, t) is None   # C# not in C major
-    assert follow(stored(C4, MENU_SHAPES[0]), C4, PMIN, CLOSE, t) is None  # a 5-note scale
-    assert follow(stored(C4, MENU_SHAPES[0]), C4, -1, CLOSE, t) is None    # chromatic: no key
-    assert follow([C4, -3, 4, 0, 0, 0, 0, 0], C4, ION, CLOSE, t) is None   # a downward interval
-
-
-def test_every_menu_shape_follows_safely():
-    t = masks()
-    for scale in range(35):
-        for note in range(128):
-            for shape in MENU_SHAPES:
-                for v in range(5):
-                    r = follow(stored(note, shape), C4, scale, v, t)
-                    if r is None:
-                        continue
-                    assert len(r) == len(shape)
-                    assert all(1 <= i <= 127 for i in r[1:])
-                    assert all(0 <= n <= 127 for n in names(r))
-
-
-def test_menu_shapes_match_the_os():
-    if not SYX or not os.path.exists(SYX):
-        raise Skip('missing ELEKLOADER_DN_SYX')
-    dev = [d for d in devices.devices() if d.key == 'digitone-mk1'][0]
-    st, d, rel = formats.load(open(SYX, 'rb').read())
-    if rel != dev.releases['1.43']:
-        raise Skip('the table address is 1.43\'s')
-    img = formats.main_image(st, dev)
-    o = 0x401d3fc5 - LOAD
-    for k, shape in enumerate(MENU_SHAPES):
-        rec = [b for b in img[o + 4 * k:o + 4 * k + 4] if b != 0xff]
-        assert rec == shape, 'shape %d: OS %r, test %r' % (k, rec, shape)
+def test_small_scales_keep_each_note_once():
+    for mode in (CENTER, SPREAD):
+        r = play(C4, S13579, mode, C4, scale=PMIN)
+        assert r is not None and len(set(t % 12 for t in r)) == len(r)
 
 
 def test_every_chord_is_safe_for_the_firmware():
-    """Every result: notes 0-127, intervals 1-127, at most 8 notes, for every input."""
+    """Every result: 2-8 notes, notes 0-127, intervals 1-127, for every input."""
     t = masks()
     for scale in range(-1, 35):
-        for root in (0, 60, 127):
-            for note in range(128):
-                for typ in range(1, 8):
-                    for v in range(5):
-                        r = build(note, root, scale, typ, v, t)
-                        if r is None:
-                            continue
-                        assert 1 < len(r) <= 8
-                        assert all(1 <= i <= 127 for i in r[1:])
-                        assert all(0 <= n <= 127 for n in names(r))
+        for note in range(0, 128, 1):
+            for shape in range(8):
+                for mode in range(3):
+                    for center in (36, 60, 96) if mode else (60,):
+                        for bass in range(4):
+                            r = chord(note, 60, scale, shape, mode, center, bass, t)
+                            if r is None:
+                                continue
+                            assert 2 <= len(r) <= 8
+                            assert all(1 <= i <= 127 for i in r[1:])
+                            assert 0 <= r[0] and r[0] + max(r[1:]) <= 127
 
 
 def test_header_masks_match_the_os_scale_table():
-    if not SYX or not os.path.exists(SYX):
-        raise Skip('missing ELEKLOADER_DN_SYX')
-    dev = [d for d in devices.devices() if d.key == 'digitone-mk1'][0]
-    st, d, rel = formats.load(open(SYX, 'rb').read())
-    assert d is dev and rel == dev.releases['1.43'], 'the table address is 1.43\'s'
-    img = formats.main_image(st, dev)
+    img = stock_image()
     t = masks()
     checked = 0
     for k in range(35):
@@ -287,6 +225,24 @@ def test_header_masks_match_the_os_scale_table():
         assert t[k] == want, 'scale %d: header %03x, OS %03x' % (k, t[k], want)
         checked += 1
     assert checked == 23, checked       # 1.43 keeps 23 of its 35 scales in this table
+
+
+def test_chromatic_types_are_the_os_chord_shapes():
+    """MAJ ... SUS4 are the Note Add menu's own shapes 0-5, 7 and 8."""
+    img = stock_image()
+    os_shapes = [[b for b in img[SHAPES_143 - LOAD + 4 * k:SHAPES_143 - LOAD + 4 * k + 4] if b != 0xff]
+                 for k in range(12)]
+    assert SEMIS == [os_shapes[k] for k in (0, 1, 2, 3, 4, 5, 7, 8)], os_shapes
+
+
+def stock_image():
+    if not SYX or not os.path.exists(SYX):
+        raise Skip('missing ELEKLOADER_DN_SYX')
+    dev = [d for d in devices.devices() if d.key == 'digitone-mk1'][0]
+    st, d, rel = formats.load(open(SYX, 'rb').read())
+    if rel != dev.releases['1.43']:
+        raise Skip('the table addresses are 1.43\'s')
+    return formats.main_image(st, dev)
 
 
 if __name__ == '__main__':
