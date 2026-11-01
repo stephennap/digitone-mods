@@ -48,6 +48,8 @@
 
 /* The pattern's lock tables (as fxkit-dn1 reads them): a track's 10319 bytes, a step's row 160, a
  * slot's lock a big-endian s16 at 2 * slot, -1 for none. 10319 is odd, so read them by bytes. */
+#define TR_STEP_NOTES 0x1c0          /* a track's step notes: 8 bytes a step, the note first
+                                         * (seq-events-dn1's dev.h: TR_NOTES) */
 #define LOCKS        0x1e80
 #define TRACK_LOCKS  10319
 #define STEP_LOCKS   160
@@ -223,6 +225,7 @@ struct core_page chords_page = {
 /* ---- the page's state, as it shows ------------------------------------------------------------ */
 struct ch_view {
     int32_t track, step, mode, shape, bass, center, root, scale;    /* step: the held trig's, or -1 */
+    int32_t note;                       /* the held trig's note (its chord's root), or -1 */
     int8_t last[CH_MAX_TONES];
 };
 
@@ -249,6 +252,7 @@ static int ch_view(struct ch_view *v)
     v->bass = ch_value(t, v->step, SLOT_BASS, BASSES - 1);
     v->center = ch_center[t];
     v->root = ch_clamp(FW_TRACK_ROOT(trk), 0, 127);
+    v->note = v->step >= 0 ? (int8_t)trk[TR_STEP_NOTES + 8 * v->step] : -1;
     for (i = 0; i < CH_MAX_TONES; i++)
         v->last[i] = ch_last[t][i];
     return 1;
@@ -319,6 +323,13 @@ int32_t chords_enc(void *brain, void *ev)
     if (!d)
         return 1;
     trk = FW_TRACK(fw_pattern, v.track);
+    if (ch_held_key >= 0) {             /* a trig held: F is its note; the track's A, B, G wait */
+        if (e == 6 && v.step >= 0) {
+            int32_t n = v.note >= 0 ? v.note : FW_TRACK_NOTE(trk);
+            trk[TR_STEP_NOTES + 8 * v.step] = (uint8_t)ch_clamp(n + d, 0, 127);
+        }
+        return 1;
+    }
     switch (e) {
     case 1:
         ch_center[v.track] = (uint8_t)ch_clamp(v.center + d, 0, CENT_MAX);
@@ -379,7 +390,8 @@ void chords_tick(void *ctrl)
     if (!ch_view(&v))
         return;
     s = (uint32_t)(v.track | v.mode << 2 | v.shape << 4 | v.bass << 8 | v.center << 10 |
-                   v.root << 16 | (v.scale + 1) << 23) ^ (uint32_t)(v.step + 1) * 0x9e3779b9u;
+                   v.root << 16 | (v.scale + 1) << 23) ^ (uint32_t)(v.step + 1) * 0x9e3779b9u ^
+        (uint32_t)(v.note + 1) * 0x85ebca6bu;
     for (i = 0; i < CH_MAX_TONES; i++)
         s = s * 31u + (uint8_t)v.last[i];
     if (s != ch_drawn) {
@@ -543,8 +555,13 @@ void chords_draw(void *bmp, void *ctrl)
     } else {
         ch_big(bmp, 16, 7, "OFF");
     }
-    ch_label(bmp, 48, 18, "ROOT");
-    ch_note_name(buf, v.root);
+    if (v.step >= 0 && v.note >= 0) {   /* a held trig: its note, its chord's root */
+        ch_label(bmp, 48, 18, "NOTE");
+        ch_note_name(buf, v.note);
+    } else {
+        ch_label(bmp, 48, 18, "ROOT");
+        ch_note_name(buf, v.root);
+    }
     ch_big(bmp, 48, 7, buf);
     ch_label(bmp, 80, 18, "SCALE");
     ch_big(bmp, 80, 7, ch_scale_names[ch_clamp(v.scale + 1, 0, SCALE_MAX + 1)]);

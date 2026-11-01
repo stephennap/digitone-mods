@@ -1,5 +1,5 @@
 {
- "id": "chords", "version": "0.7",
+ "id": "chords", "version": "0.8",
  "license": "GPL-2.0-or-later",
  "title": "CHORDS (keyboard chord modes)", "category": "Sequencer", "author": "stephen",
  "description": "The Digitone II's chord modes for the Digitone mk1 and Digitone Keys, on the TRIG key's second page, Chords, drawn after the Digitone II's keyboard setup screen: a keyboard with the last chord and the CENTER arrow (knob A), BASS OCT (D), MODE (E: OFF, CHORD ROOT, CENTER, SPREAD), the track's keyboard ROOT (F) and SCALE (G), and SHAPE (H; the Digitone II's 8 shapes in a scale and its 12 types on chromatic); D, E and H are stock knobs, so holding a trig while turning one p-locks it: a different chord on each trig. With MODE on, each single-note trig on the track plays that chord from ROOT and SCALE; trigs that hold a chord play as stored. The sequencer's trigs only for now, not the TRIG keys played live. Needs core-dn1 3.3 and seq-events.",

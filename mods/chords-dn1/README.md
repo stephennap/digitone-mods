@@ -51,8 +51,14 @@ they p-lock that trig, as any knob does. So each trig can have its own MODE,
 SHAPE and BASS OCT. While a trig is held the title shows it (`T1  TRIG 5`)
 and the page shows that trig's values. On a track longer than 16 steps the
 page cannot see which page of steps is shown: it shows `TRIG ?` until a knob
-is turned, then the step that turn locked. CENTER, ROOT and SCALE are not
-per trig (as on the Digitone II).
+is turned, then the step that turn locked.
+
+With a trig held, F is that trig's **NOTE**, its chord's root (the trig's own
+note, the one the note page shows), so each trig picks its chord in the key;
+with none held F is the track's ROOT, the key itself. CENTER, INV and SCALE
+(A, B, G) are the track's, not a trig's, as on the Digitone II: with a trig
+held they do nothing, so a turn meant for the trig cannot change every
+chord.
 
 The keyboard shows two octaves with a dot on each note of the last chord
 the track played. Notes are named as the Digitone names them: MIDI 60 is C5.
