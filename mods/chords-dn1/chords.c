@@ -260,9 +260,11 @@ static int ch_view(struct ch_view *v)
 
 /* ---- keys and knobs (the UI task) -------------------------------------------------------------- */
 /* The TRIG keys stay the stock's (a trig held and a knob turned p-locks it); the mod only watches
- * which one is held, to show that trig's chord. Its step is the key's on a track of up to 16 steps;
- * on a longer one (pages the mod cannot see) it is the step whose lock changes while the key is held
- * (chords_tick). Every key also gives us the brain for ev_draw. */
+ * which one is held, to show that trig's chord. Its step is made as the grid makes it (1.43:
+ * 0x400b02cc): the key + 16 x the page of steps shown, +0x190 of the grid's state, whose pointer is
+ * at CH_SEQ_UI (mod.json's cflags, per OS). Without that state: the key's step on a track of up to
+ * 16 steps, else the step whose lock changes while the key is held (chords_tick). Every key also
+ * gives us the brain for ev_draw. */
 int32_t chords_key(void *brain, void *ev)
 {
     uint32_t key = EV_KEY(ev), fl = EV_FLAGS(ev);
@@ -276,9 +278,14 @@ int32_t chords_key(void *brain, void *ev)
         if (k == ch_held_key)
             ch_held_key = ch_held_step = -1;
     } else if (!(fl & 8) && !(fl & 2)) {        /* a press, not FUNC + TRIG */
+        uint8_t *ui = *(uint8_t *volatile *)CH_SEQ_UI;  /* the grid's state: +0x190 its page (0-7) */
+        int32_t pg = ui ? *(volatile int32_t *)(ui + 0x190) : -1;
         ch_held_key = k;
-        ch_held_step = t >= 0 && t < SQ_AUDIO && sq_track_info(t, &info, sizeof info) >= 0 &&
-                       info.len <= 16 ? k : -1;
+        if (pg >= 0 && pg < SQ_STEPS / 16)              /* the step as the grid makes it */
+            ch_held_step = 16 * pg + k;
+        else
+            ch_held_step = t >= 0 && t < SQ_AUDIO && sq_track_info(t, &info, sizeof info) >= 0 &&
+                           info.len <= 16 ? k : -1;
     }
     return 0;
 }
@@ -355,7 +362,7 @@ int32_t chords_enc(void *brain, void *ev)
 }
 
 /* The active track's locks of MODE, SHAPE and BASS OCT, as last seen: a change while a TRIG key is
- * held says which step it holds (on a track longer than 16 steps). */
+ * held says which step it holds, should the grid's page not (chords_key). */
 static int16_t ch_seen[SQ_STEPS][3];
 static int32_t ch_seen_track = -1;
 

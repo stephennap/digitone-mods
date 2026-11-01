@@ -49,9 +49,8 @@ CENTER   C5     DOR   1-3-5
 on their own they set the sound, so every trig; turned while a trig is held,
 they p-lock that trig, as any knob does. So each trig can have its own MODE,
 SHAPE and BASS OCT. While a trig is held the title shows it (`T1  TRIG 5`)
-and the page shows that trig's values. On a track longer than 16 steps the
-page cannot see which page of steps is shown: it shows `TRIG ?` until a knob
-is turned, then the step that turn locked.
+and the page shows that trig's values, on any of the 64 steps: the step is
+the one the Digitone's own grid makes of the key and the page of steps shown.
 
 With a trig held, F is that trig's **NOTE**, its chord's root (the trig's own
 note, the one the note page shows), so each trig picks its chord in the key;
@@ -110,9 +109,14 @@ and 183 (BASS OCT, MODE, SHAPE), so the stock turns and p-locks them; the
 others are empty. While `core_page_shown` says it is up, `chords_draw`
 (`ev_draw`) clears the screen and draws it, and `chords_enc` (`ev_enc`)
 takes knobs A, B, C, F and G. `chords_key` (`ev_key`) takes no key: it
-watches which TRIG key is held, whose step is the key's on a track of up to
-16 steps; on a longer one `chords_tick` finds it as the step whose lock of
-MODE, SHAPE or BASS OCT changes while the key is held. `ev_draw` has no
+watches which TRIG key is held, and makes its step as the grid does
+(1.43: 0x400b02cc): the key's index + 16 x the page of steps shown, which is
+`+0x190` (0-7) of the grid's state, a singleton whose pointer is at
+`0x419efdd8` (1.44: `0x419f0dd8`; its getter 0x40149dec, 1.44 0x4014a060, the
+page getter 0x400ade98, 1.44 0x400adf28), given to the mod as `CH_SEQ_UI` in
+`mod.json`'s `cflags`. Should that pointer be unset, the step is the key's on
+a track of up to 16 steps, and on a longer one `chords_tick` finds it as the
+step whose lock of MODE, SHAPE or BASS OCT changes while the key is held. `ev_draw` has no
 brain to ask, so the mod keeps the key dispatcher's from its first key or
 knob event. `chords_tick` redraws when what the page shows changes. ROOT and
 SCALE are
@@ -138,7 +142,8 @@ or BASS OCT: set both once on the page. CENTER starts at AUTO.
 ## Not checked yet
 
 - Not yet run on a unit: p-locking D, E and H with a trig held, BASS OCT's
-  p-locks (slot 0) as played, and the held trig's values on the page.
+  p-locks (slot 0) as played, and the held trig's values on the page, on
+  steps 17-64 too (the grid's page read from its state).
 - SHAPE's stock knob runs to 12 whatever SCALE: in a scale the values past
   the 8th show and play as 1-4-7.
 - ROOT and SCALE written here: whether the keyboard follows at once without
