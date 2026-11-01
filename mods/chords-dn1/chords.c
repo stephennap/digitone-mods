@@ -235,6 +235,25 @@ struct ch_view {
 static int32_t ch_held_key = -1;        /* the TRIG key held (0-15), or -1 */
 static int32_t ch_held_step = -1;       /* its step, once known, or -1 */
 
+/* The grid's state (a singleton, its pointer at CH_SEQ_UI: mod.json's cflags, per OS) keeps the
+ * steps whose trigs are held as a 64-bit mask, bit n step n: +0x158 steps 32-63, +0x15c steps 0-31
+ * (1.43: the test 0x400adb50, the setter 0x400ae3cc from the grid's key press; 1.44: 0x400adbe0).
+ * -> the held step on the held key's column (step % 16 == key), the lowest, or -1. */
+static int32_t ch_held_mask(int32_t key)
+{
+    const volatile uint8_t *ui = *(uint8_t *volatile *)CH_SEQ_UI;
+    uint32_t hi, lo;
+    int32_t st;
+    if (!ui || key < 0)
+        return -1;
+    hi = *(const volatile uint32_t *)(ui + 0x158);
+    lo = *(const volatile uint32_t *)(ui + 0x15c);
+    for (st = key; st < SQ_STEPS; st += 16)
+        if ((st < 32 ? lo >> st : hi >> (st - 32)) & 1)
+            return st;
+    return -1;
+}
+
 static int ch_shown(void)
 {
     return ch_brain && core_page_shown(ch_brain, &chords_page);
@@ -248,6 +267,11 @@ static int ch_view(struct ch_view *v)
         return 0;
     trk = FW_TRACK(pat, t);
     v->track = t;
+    if (ch_held_key >= 0) {             /* the stock's mask, once it says */
+        int32_t st = ch_held_mask(ch_held_key);
+        if (st >= 0)
+            ch_held_step = st;
+    }
     v->step = ch_held_key >= 0 ? ch_held_step : -1;     /* a held trig: its p-locks, else the sound */
     v->scale = FW_TRACK_SCALE(trk);
     v->mode = ch_value(t, v->step, SLOT_MODE, MODES - 1);
@@ -262,10 +286,9 @@ static int ch_view(struct ch_view *v)
 }
 
 /* ---- keys and knobs (the UI task) -------------------------------------------------------------- */
-/* The TRIG keys stay the stock's (a trig held and a knob turned p-locks it); the mod only watches
- * which one is held, to show that trig's chord. Its step is made as the grid makes it (1.43:
- * 0x400b02cc): the key + 16 x the page of steps shown, +0x190 of the grid's state, whose pointer is
- * at CH_SEQ_UI (mod.json's cflags, per OS). Without that state: the key's step on a track of up to
+/* The TRIG keys stay the stock's; the mod only watches which one is held, to show and edit that
+ * trig's chord. Its step comes from the grid's own held-steps mask (ch_held_mask), which the stock
+ * sets after this handler; until then, and should it be unset, the key's step on a track of up to
  * 16 steps, else the step whose lock changes while the key is held (chords_tick). Every key also
  * gives us the brain for ev_draw. */
 int32_t chords_key(void *brain, void *ev)
@@ -281,14 +304,9 @@ int32_t chords_key(void *brain, void *ev)
         if (k == ch_held_key)
             ch_held_key = ch_held_step = -1;
     } else if (!(fl & 8) && !(fl & 2)) {        /* a press, not FUNC + TRIG */
-        uint8_t *ui = *(uint8_t *volatile *)CH_SEQ_UI;  /* the grid's state: +0x190 its page (0-7) */
-        int32_t pg = ui ? *(volatile int32_t *)(ui + 0x190) : -1;
-        ch_held_key = k;
-        if (pg >= 0 && pg < SQ_STEPS / 16)              /* the step as the grid makes it */
-            ch_held_step = 16 * pg + k;
-        else
-            ch_held_step = t >= 0 && t < SQ_AUDIO && sq_track_info(t, &info, sizeof info) >= 0 &&
-                           info.len <= 16 ? k : -1;
+        ch_held_key = k;                /* its step: ch_held_mask, once the stock has set it */
+        ch_held_step = t >= 0 && t < SQ_AUDIO && sq_track_info(t, &info, sizeof info) >= 0 &&
+                       info.len <= 16 ? k : -1;
     }
     return 0;
 }
