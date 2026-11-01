@@ -53,6 +53,9 @@
 #define LOCKS        0x1e80
 #define TRACK_LOCKS  10319
 #define STEP_LOCKS   160
+#define LOCK_COUNT   0x9e               /* a row's count of locks, a big-endian u16 */
+#define LOCK_USED    0x2800             /* a track's table: a byte a slot, 1: some step locks it */
+#define SLOTS        79                 /* a row's slots */
 
 /* ---- state ------------------------------------------------------------------------------------ */
 /* per track: CENTER, 0 AUTO; the project data below, which core copies a long word at a time */
@@ -310,8 +313,37 @@ static uint32_t ch_pcs_of(const struct ch_view *v)
     return m;
 }
 
+/* A trig's p-lock of a slot, as fxkit-dn1 writes them (and the stock's lock setter, 1.43: 0x40024236):
+ * the value (8.8) in the step's row, the row's count, the track's used flag, and a lock trig on a
+ * step with no trig. The TRIG key's pages do not p-lock sound slots themselves, so the mod does.
+ * The rows are big-endian, at odd addresses on odd tracks: by bytes. UI task. */
+static void ch_lock_set(int32_t track, int32_t step, int32_t slot, int32_t value)
+{
+    uint8_t *pat = fw_pattern, *t, *row;
+    volatile uint16_t *w;
+    int32_t k, n = 0;
+    if (!pat || track < 0 || track >= SQ_AUDIO || step < 0 || step >= SQ_STEPS || slot < 0 ||
+        slot >= SLOTS)
+        return;
+    t = pat + LOCKS + TRACK_LOCKS * track;
+    row = t + STEP_LOCKS * step;
+    value <<= 8;
+    row[2 * slot] = (uint8_t)(value >> 8);
+    row[2 * slot + 1] = (uint8_t)value;
+    for (k = 0; k < SLOTS; k++)         /* the row's count (0x40023ed2) */
+        if (!(row[2 * k] & 0x80))
+            n++;
+    row[LOCK_COUNT] = (uint8_t)(n >> 8);
+    row[LOCK_COUNT + 1] = (uint8_t)n;
+    t[LOCK_USED + slot] = 1;            /* (0x400241f6) */
+    w = &FW_STEP(FW_TRACK(pat, track), step);
+    if (!(*w & (FW_STEP_TRIG | FW_STEP_LOCK_TRIG)))
+        *w = (uint16_t)(*w | FW_STEP_LOCK_TRIG);        /* a lock trig carries the step's locks */
+}
+
 /* While the page shows, these knobs are ours: A CENTER, B its inversion steps, F ROOT, G SCALE (C
- * does nothing). D, E and H are the stock's, so a held trig p-locks them. */
+ * does nothing); D, E and H are the stock's, the sound's. With a trig held: F its note, D, E, H its
+ * p-locks (ch_lock_set), A, B, G nothing. */
 int32_t chords_enc(void *brain, void *ev)
 {
     uint32_t e = EV_KEY(ev);
@@ -320,9 +352,10 @@ int32_t chords_enc(void *brain, void *ev)
     int32_t d, i;
 
     ch_brain = brain;
-    if (e < 1 || e > 8 || e == 4 || e == 5 || e == 8 || !core_page_shown(brain, &chords_page) ||
-        !ch_view(&v))
+    if (e < 1 || e > 8 || !core_page_shown(brain, &chords_page) || !ch_view(&v))
         return 0;
+    if (ch_held_key < 0 && (e == 4 || e == 5 || e == 8))
+        return 0;                       /* no trig held: D, E, H are the stock's, the sound's */
     i = (int32_t)e - 1;
     ch_acc[i] += EV_DELTA(ev);
     d = ch_acc[i] / COUNTS;
@@ -330,10 +363,20 @@ int32_t chords_enc(void *brain, void *ev)
     if (!d)
         return 1;
     trk = FW_TRACK(fw_pattern, v.track);
-    if (ch_held_key >= 0) {             /* a trig held: F is its note; the track's A, B, G wait */
-        if (e == 6 && v.step >= 0) {
+    if (ch_held_key >= 0) {             /* a trig held: F is its note, D, E, H its p-locks; the
+                                           track's A, B, G wait */
+        if (v.step < 0)
+            return 1;
+        if (e == 6) {
             int32_t n = v.note >= 0 ? v.note : FW_TRACK_NOTE(trk);
             trk[TR_STEP_NOTES + 8 * v.step] = (uint8_t)ch_clamp(n + d, 0, 127);
+        } else if (e == 4) {
+            ch_lock_set(v.track, v.step, SLOT_BASS, ch_clamp(v.bass + d, 0, BASSES - 1));
+        } else if (e == 5) {
+            ch_lock_set(v.track, v.step, SLOT_MODE, ch_clamp(v.mode + d, 0, MODES - 1));
+        } else if (e == 8) {
+            ch_lock_set(v.track, v.step, SLOT_SHAP,
+                        ch_clamp(v.shape + d, 0, ch_shape_count(v.scale) - 1));
         }
         return 1;
     }

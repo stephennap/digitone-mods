@@ -45,9 +45,8 @@ CENTER   C5     DOR   1-3-5
 | G | SCALE | the track's keyboard SCALE, by the OS's short names (CHRO, ION, DOR ...) | the pattern (the stock setting itself) |
 | H | SHAPE / TYPE | the Digitone II's, in its order: in a scale 8 shapes, 1-3-5, 1-2-5, 1-3, 1-4, 1-5, 1-4-5, 1-3-5-7, 1-4-7; on chromatic 12 types, MAJ, MIN, 7TH, MIN7, MAJ7, DIM, DIM7, SUS2, SUS4, 6, MIN6, ADD9 | the sound, or a trig's p-lock |
 
-**A chord a trig.** D, E and H are stock knobs under the drawn page: turned
-on their own they set the sound, so every trig; turned while a trig is held,
-they p-lock that trig, as any knob does. So each trig can have its own MODE,
+**A chord a trig.** Turned on their own, D, E and H set the sound, so every
+trig; turned while a trig is held, they p-lock that trig, as any knob does. So each trig can have its own MODE,
 SHAPE and BASS OCT. While a trig is held the title shows it (`T1  TRIG 5`)
 and the page shows that trig's values, on any of the 64 steps: the step is
 the one the Digitone's own grid makes of the key and the page of steps shown.
@@ -105,10 +104,15 @@ intervals above it, each 1-127, at most 8: seq-events passes them to the
 firmware unchecked. It keeps each track's last notes for the keyboard.
 
 The page is a mod page whose D, E and H are the parameter slots 184, 182
-and 183 (BASS OCT, MODE, SHAPE), so the stock turns and p-locks them; the
-others are empty. While `core_page_shown` says it is up, `chords_draw`
-(`ev_draw`) clears the screen and draws it, and `chords_enc` (`ev_enc`)
-takes knobs A, B, C, F and G. `chords_key` (`ev_key`) takes no key: it
+and 183 (BASS OCT, MODE, SHAPE), so with no trig held the stock turns them,
+setting the sound; the others are empty. The TRIG key's pages do not p-lock
+sound slots with a trig held (seen on a unit), so then `chords_enc` turns D,
+E and H itself and `ch_lock_set` writes the trig's p-lock as fxkit-dn1 does:
+the value in the step's row, the row's count (`+0x9e`), the track's used
+flag (`+0x2800`) and a lock trig on a step with no trig. While
+`core_page_shown` says the page is up, `chords_draw` (`ev_draw`) clears the
+screen and draws it, and `chords_enc` (`ev_enc`) takes knobs A, B, C, F and
+G, and D, E and H with a trig held. `chords_key` (`ev_key`) takes no key: it
 watches which TRIG key is held, and makes its step as the grid does
 (1.43: 0x400b02cc): the key's index + 16 x the page of steps shown, which is
 `+0x190` (0-7) of the grid's state, a singleton whose pointer is at
