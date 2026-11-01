@@ -20,8 +20,9 @@
  *    while a trig is held the page shows its chord
  * F  ROOT and G  SCALE: the track's keyboard ROOT and SCALE themselves
  *
- * With MODE on, each single-note trig on the track plays the chord from ROOT and SCALE. Trigs that
- * hold a chord play as stored. The sequencer's trigs only for now, not the TRIG keys played live. */
+ * With MODE on, each single-note trig on the track plays the chord from ROOT and SCALE, and so does
+ * each note played on the TRIG keys in keyboard mode or over MIDI (live.s). Trigs that hold a chord
+ * play as stored. */
 #include "digitone-mk1/core3.h"
 #include "digitone-mk1/seq.h"
 #include "chordmath.h"
@@ -136,6 +137,56 @@ void chords_notes(int32_t track, int32_t step, int8_t notes[SQ_NOTES])
     }
     for (i = 0; i < CH_MAX_TONES; i++)  /* for the page's keyboard */
         ch_last[track][i] = notes[i];
+}
+
+/* ---- played notes: the TRIG keys in keyboard mode, and MIDI in (live.s) ------------------------ */
+/* Each held note's chord, as its press played it, per track: its release carries the same notes, so
+ * every voice of the chord stops, whatever changed meanwhile. */
+static int8_t ch_held_notes[SQ_AUDIO][128][CH_MAX_TONES];
+static uint8_t ch_held_count[SQ_AUDIO][128];
+
+/* The builder of a played note's event (the UI or the MIDI task): the event (+8 its track, +0x14 its
+ * count, +0x18 on its notes, absolute) holds the note alone. On a synth track with MODE on, a press
+ * gets the chord the sound's MODE, SHAPE and BASS OCT and the track's ROOT, SCALE and CENTER make of
+ * it (no p-locks: no step plays it); a release (the request's flags 0) gets the chord its press
+ * got. */
+void chords_played(uint8_t *ev, const uint8_t *req)
+{
+    struct sq_track info;
+    int8_t out[CH_MAX_TONES];
+    int32_t track = *(volatile int32_t *)(ev + 8), note = (int8_t)ev[0x18], i, n, mode, c;
+    int release = *(const volatile uint32_t *)(req + 0x10) == 0;
+
+    if (track < 0 || track >= SQ_AUDIO || note < 0)
+        return;
+    if (release) {
+        n = ch_held_count[track][note];
+        if (n < 2)
+            return;
+        for (i = 0; i < n; i++)
+            ev[0x18 + i] = (uint8_t)ch_held_notes[track][note][i];
+        *(volatile uint32_t *)(ev + 0x14) = (uint32_t)n;
+        ch_held_count[track][note] = 0;
+        return;
+    }
+    ch_held_count[track][note] = 0;
+    mode = ch_value(track, -1, SLOT_MODE, MODES - 1);
+    if (!mode || sq_track_info(track, &info, sizeof info) < 0 || info.root == SQ_ROOT_NONE)
+        return;
+    c = ch_center[track];
+    n = ch_chord(note, info.root, info.scale, ch_value(track, -1, SLOT_SHAP, CH_TYPES - 1), mode - 1,
+                 c ? CENT_BASE + c : note, ch_value(track, -1, SLOT_BASS, BASSES - 1), out);
+    if (n < 2)
+        return;
+    for (i = 0; i < n; i++) {           /* the event's notes are absolute */
+        int8_t a = (int8_t)(i ? out[0] + out[i] : out[0]);
+        ev[0x18 + i] = (uint8_t)a;
+        ch_held_notes[track][note][i] = a;
+    }
+    *(volatile uint32_t *)(ev + 0x14) = (uint32_t)n;
+    ch_held_count[track][note] = (uint8_t)n;
+    for (i = 0; i < CH_MAX_TONES; i++)  /* for the page's keyboard */
+        ch_last[track][i] = i < n ? out[i] : 0;
 }
 
 /* ---- the knobs -------------------------------------------------------------------------------- */

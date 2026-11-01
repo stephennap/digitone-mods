@@ -6,17 +6,20 @@ shape, a center position and BASS OCT, on a page drawn after the Digitone
 II's keyboard setup screen. The chords are built from each track's keyboard
 ROOT and SCALE.
 
-**Phase 1: sequenced trigs.** A single-note trig on a track with MODE on
-plays the chord. The TRIG keys played live still play single notes: that
-needs a new hook in the keyboard's note path (phase 2).
+A single-note trig on a track with MODE on plays the chord, and so does a
+note played live: on the TRIG keys in keyboard mode, or over MIDI in on the
+track's channel. Played live, the chord is held as long as the key, so the
+**arpeggiator** steps through it. (The mk1's arpeggiator plays only the
+first note of a chord a trig plays from the sequencer, the Note Add menu's
+chords too: to arpeggiate a chord, play it.)
 
 | | |
 |---|---|
 | needs | core-dn1 3.3 or newer (parameter slots, mod pages, project data, `fw_pattern`), seq-events |
-| sites | none: `ev_fire_notes`, `ev_key`, `ev_enc`, `ev_tick`, `ev_draw`, three `core_params`, a `core_pages` and a `core_projdata` entry, so its 1.44 port is empty |
+| sites | one, the played note's: 0x400ff1d6 (1.44 0x400ff44a), in the builder of a played note's event; and `ev_fire_notes`, `ev_key`, `ev_enc`, `ev_tick`, `ev_draw`, three `core_params`, a `core_pages` and a `core_projdata` entry |
 | claims | `param:182`-`184`, `page:27` (after page 1, the TRIG key's Trig Parameters), `projdata:CHRD`, and sound slots 26, 65 and 0 (so not with digitables or machines) |
 | RAM | 7.4 KB code |
-| sources | [chords.c](chords.c) (the page, its knobs, the handlers), [chordmath.h](chordmath.h) (the chord math, no firmware) |
+| sources | [chords.c](chords.c) (the page, its knobs, the handlers), [chordmath.h](chordmath.h) (the chord math, no firmware), [live.s](live.s) (the played note's site) |
 | tests | [tests/test_chords_dn1.py](../../tests/test_chords_dn1.py) |
 
 ## Using it
@@ -139,6 +142,20 @@ stock setters' limits (1.43: 0x40035274 clamps ROOT to 0-115, 0x4003553a
 SCALE to -1..34). The stock setters also post a change notification, which
 this does not.
 
+**Played notes.** The keyboard's play-note (0x400ea940, from KeyboardView
+at 0x4003b2ea) and MIDI in reach one builder of a played note's event
+(0x400ff178), for a key's press and its release alike; at 0x400ff1d6 it has
+written count 1 (`+0x14`) and writes the note (`+0x18`). `live.s` jsr's
+there, does that move and calls `chords_played(event, request)`: on a
+synth track with MODE on, a press (the request's flags not 0) gets the
+chord of the sound's MODE, SHAPE and BASS OCT and the track's ROOT, SCALE
+and CENTER, as absolute notes from `+0x18`, and the track and note keep it;
+a release (flags 0) gets the same notes back. Each of the event's notes
+gets a voice, and a release that carries them frees them all: seen on a
+unit with a probe (`examples/chords-probe-dn1`). The builder needs d1
+after the site, so `live.s` keeps d0-d1/a0-a1. Lint lists the site under
+`core_candidates`: an event for a played note belongs in the core.
+
 The SCALE byte is -1 for chromatic and 0-34 for the OS's scales, in the
 keyboard menu's order. In 1.43 the names are pointers at `0x40241cd0`
 (Chromatic first, so name k+1 is SCALE k; the short names are entries
@@ -155,7 +172,8 @@ or BASS OCT: set both once on the page. CENTER starts at AUTO.
 
 ## Not checked yet
 
-- Not yet run on a unit: p-locking D, E and H with a trig held, BASS OCT's
+- Not yet run on a unit: chords on the TRIG keys and over MIDI, with and
+  without the arpeggiator; p-locking D, E and H with a trig held, BASS OCT's
   p-locks (slot 0) as played, and the held trig's values on the page, on
   steps 17-64 too (the grid's page read from its state).
 - SHAPE's stock knob runs to 12 whatever SCALE: in a scale the values past
