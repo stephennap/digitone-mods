@@ -115,6 +115,19 @@ def chord(note, root, scale, shape, mode, center, bass, table):
     if tones[0] < 0 or tones[-1] > 127 or len(set(tones)) != len(tones):
         return None
     return [tones[0]] + [t - tones[0] for t in tones[1:]]
+
+
+def inversion(pcs, center, d):
+    """chordmath.h's ch_inversion: pcs a set of note classes."""
+    placed = []
+    for p in pcs:
+        t = center + (p - center) % 12
+        if t > center + 6:
+            t -= 12
+        placed.append(t)
+    if not placed:
+        return center
+    return min(placed) + 6 if d > 0 else max(placed) - 7
 # ------------------------------------------------------------------------------------------------
 
 
@@ -171,6 +184,39 @@ def test_center_keeps_the_hand_in_place():
     assert play(F4 - 24, S135, CENTER, C4) == [A3, C4, F4]      # the played octave does not matter
     every = [play(n, S135, CENTER, C4) for n in (C4, D4, E4, F4, G4, A4, B4)]
     assert all(C4 - 5 <= t <= C4 + 6 for ch in every for t in ch)
+
+
+def test_inversion_steps_move_the_center_one_inversion():
+    """The Digitone II's [+]/[-]: knob B. C major around C4 (MIDI 60): G C E, then C E G, E G C."""
+    cmaj = {0, 4, 7}
+    up = inversion(cmaj, C4, 1)
+    assert play(C4, S135, CENTER, up) == [C4, E4, G4]
+    up2 = inversion(cmaj, up, 1)
+    assert play(C4, S135, CENTER, up2) == [E4, G4, C4 + 12]
+    assert play(C4, S135, CENTER, inversion(cmaj, C4, -1)) == [E3, G3, C4]
+
+
+def test_each_inversion_step_moves_exactly_one_note_an_octave():
+    t = masks()
+    for scale in (0, 5, 10, 7, 20, -1):
+        for note in range(48, 72):
+            for shape in range(8):
+                for c in range(48, 84, 5):
+                    r = chord(note, 60, scale, shape, CENTER, c, 0, t)
+                    if r is None:
+                        continue
+                    now = [r[0] + (i and r[i]) for i in range(len(r))]
+                    pcs = {x % 12 for x in now}
+                    for d in (1, -1):
+                        c2 = inversion(pcs, c, d)
+                        r2 = chord(note, 60, scale, shape, CENTER, c2, 0, t)
+                        nxt = [r2[0] + (i and r2[i]) for i in range(len(r2))]
+                        moved = sorted(set(nxt) - set(now))
+                        gone = sorted(set(now) - set(nxt))
+                        if d > 0:
+                            assert gone == [min(now)] and moved == [min(now) + 12], (now, nxt)
+                        else:
+                            assert gone == [max(now)] and moved == [max(now) - 12], (now, nxt)
 
 
 def test_spread_lifts_every_second_note():

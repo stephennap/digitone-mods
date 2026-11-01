@@ -28,7 +28,7 @@ On a synth track, press TRIG (the note page) again: the Chords page.
 | CHORDS T1               | OCT
 | [keyboard: the chord,   |  -1
 |  the center's arrow]    | (D)
-| CENTER C5          (A)  |
+| CNTR C5 (A)    INV (B) |
 +-------------------------+
  MODE   ROOT   SCALE  SHAPE
 CENTER   C5     DOR   1-3-5
@@ -38,7 +38,8 @@ CENTER   C5     DOR   1-3-5
 | knob | | values | kept in |
 |---|---|---|---|
 | A | CENTER | AUTO (centers on the played note), C3-C8; an arrow under the keyboard | the project, per track |
-| D | BASS OCT | 0, -1, -2, -3 | the sound |
+| B | INV | moves CENTER to the next (right) or last (left) inversion of the chord, as the Digitone II's [+]/[-] on their own; from AUTO it starts at ROOT | the project, per track |
+| D | BASS OCT | 0, -1, -2, -3; "--" and fixed while MODE is OFF | the sound |
 | E | MODE | OFF, CHORD ROOT, CHORD CENTER, CHORD SPREAD | the sound |
 | F | ROOT | the track's keyboard ROOT, a note | the pattern (the stock setting itself) |
 | G | SCALE | the track's keyboard SCALE, by the OS's short names (CHRO, ION, DOR ...) | the pattern (the stock setting itself) |
@@ -54,6 +55,12 @@ the track played. Notes are named as the Digitone names them: MIDI 60 is C5.
   C plays G4 C5 E5, F plays A4 C5 F5, G plays G4 B4 D5.
 - **CHORD SPREAD**: CENTER's chord with every second note an octave up (C:
   G4 E5 C6).
+- **INV** (knob B): CENTER places each note from CENTER-5 to CENTER+6,
+  so a step up moves CENTER to the lowest note + 6, which lifts exactly
+  that note an octave, and a step down to the highest note - 7, which
+  drops exactly that one: the next inversion, whatever the chord. It
+  steps through the last chord the track played, or ROOT's chord before
+  any has.
 - **BASS OCT** (-1 to -3): the root again, that many octaves below the
   chord's root and under every note. With more than three notes it replaces
   the root: C4 on 1-3-5-7 at -1 plays C3 E4 G4 B4.
@@ -84,8 +91,8 @@ firmware unchecked. It keeps each track's last notes for the keyboard.
 
 The page is a mod page with no stock knobs (all eight ids 0). While
 `core_page_shown` says it is up, `chords_draw` (`ev_draw`) clears the
-screen and draws it, `chords_enc` (`ev_enc`) takes all eight knobs (B and C
-do nothing), and `chords_key` (`ev_key`) takes TRIG 1-8, press and release;
+screen and draws it, `chords_enc` (`ev_enc`) takes all eight knobs (C does
+nothing), and `chords_key` (`ev_key`) takes TRIG 1-8, press and release;
 FUNC + TRIG stays stock. `ev_draw` has no brain to ask, so the mod keeps
 the key dispatcher's from its first key or knob event. `chords_tick`
 redraws when what the page shows changes. MODE, SHAPE and BASS OCT are set

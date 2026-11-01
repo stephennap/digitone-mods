@@ -207,4 +207,26 @@ static int32_t ch_chord(int32_t note, int32_t root, int32_t scale, int32_t shape
     return n;
 }
 
+/* The Digitone II's [+]/[-] on their own: CENTER POSITION to the next inversion of a chord, up
+ * (dir > 0) or down. pcs: the chord's note classes, bit p for C+p. CENTER places each note from
+ * center-5 to center+6, so a center just past the lowest note (lowest+6) lifts exactly that note an
+ * octave, and highest-7 drops exactly the highest. -> the new center, or center for no chord. */
+static int32_t ch_inversion(uint32_t pcs, int32_t center, int32_t dir)
+{
+    int32_t p, t, lo = 1000, hi = -1000;
+    for (p = 0; p < 12; p++)
+        if (pcs & (1u << p)) {
+            t = center + (((p - center) % 12) + 12) % 12;
+            if (t > center + 6)
+                t -= 12;
+            if (t < lo)
+                lo = t;
+            if (t > hi)
+                hi = t;
+        }
+    if (hi < lo)
+        return center;
+    return dir > 0 ? lo + 6 : hi - 7;
+}
+
 #endif

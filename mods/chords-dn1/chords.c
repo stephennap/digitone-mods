@@ -7,14 +7,15 @@
  *   | CHORDS T1               | OCT
  *   | [keyboard: the chord,   |  -1
  *   |  the center's arrow]    | (D)
- *   | CENTER C5          (A)  |
+ *   | CNTR C5 (A)    INV (B) |
  *   +-------------------------+
  *    MODE   ROOT   SCALE  SHAPE
  *   CENTER   C5     DOR   1-3-5
  *    (E)    (F)     (G)    (H)
  *
  * A  CENTER POSITION: AUTO (the played note) or C3-C8 (MIDI 36-96); the track's, saved with the project
- * D  BASS OCT 0 to -3, E  MODE (OFF, CHORD ROOT, CENTER, SPREAD), H  SHAPE (TRIG 1-8 too): the sound's
+ * B  CENTER POSITION to the next or the last inversion of the chord (the Digitone II's [+]/[-])
+ * D  BASS OCT 0 to -3 (with MODE on: "--" with it off), E  MODE (OFF, CHORD ROOT, CENTER, SPREAD), H  SHAPE (TRIG 1-8 too): the sound's
  * F  ROOT and G  SCALE: the track's keyboard ROOT and SCALE themselves
  *
  * With MODE on, each single-note trig on the track plays the chord from ROOT and SCALE. Trigs that
@@ -276,7 +277,28 @@ int32_t chords_key(void *brain, void *ev)
     return 1;
 }
 
-/* While the page shows, its knobs are ours: A CENTER, D BASS OCT, E MODE, F ROOT, G SCALE, H SHAPE. */
+/* The note classes of the chord knob B turns through: the last one the track played, else what its ROOT
+ * would play in ROOT mode. 0: none. */
+static uint32_t ch_pcs_of(const struct ch_view *v)
+{
+    int8_t out[CH_MAX_TONES];
+    const int8_t *n = v->last;
+    uint32_t m = 0;
+    int32_t i, k = CH_MAX_TONES;
+    if (n[0] < 0) {
+        k = ch_chord(v->root, v->root, v->scale, v->shape, CH_ROOT, 0, 0, out);
+        n = out;
+        if (k <= 0)
+            return 1u << (v->root % 12);
+    }
+    for (i = 0; i < k; i++)
+        if (!i || n[i])
+            m |= 1u << ((n[0] + (i ? n[i] : 0)) % 12);
+    return m;
+}
+
+/* While the page shows, its knobs are ours: A CENTER, B its inversion steps, D BASS OCT, E MODE,
+ * F ROOT, G SCALE, H SHAPE. */
 int32_t chords_enc(void *brain, void *ev)
 {
     uint32_t e = EV_KEY(ev);
@@ -298,7 +320,19 @@ int32_t chords_enc(void *brain, void *ev)
     case 1:
         ch_center[v.track] = (uint8_t)ch_clamp(v.center + d, 0, CENT_MAX);
         break;
+    case 2: {                           /* from AUTO, the steps start at ROOT */
+        uint32_t pcs = ch_pcs_of(&v);
+        int32_t c = v.center ? CENT_BASE + v.center : v.root;
+        for (; d > 0; d--)
+            c = ch_inversion(pcs, c, 1);
+        for (; d < 0; d++)
+            c = ch_inversion(pcs, c, -1);
+        ch_center[v.track] = (uint8_t)(ch_clamp(c, CENT_BASE + 1, CENT_BASE + CENT_MAX) - CENT_BASE);
+        break;
+    }
     case 4:
+        if (!v.mode)                    /* BASS OCT is the chord modes' */
+            break;
         core_sound_set(v.track, SLOT_BASS, ch_clamp(v.bass + d, 0, BASSES - 1) << 8);
         break;
     case 5:
@@ -466,14 +500,14 @@ void chords_draw(void *bmp, void *ctrl)
         ch_note_name(buf, center);
     else
         ch_text(buf, "AUTO");
-    fw_textf(bmp, FONT5, 3, 27, -1, "CENTER %s", buf);
-    fw_textf(bmp, FONT5, 74, 27, -1, "(A)");
+    fw_textf(bmp, FONT5, 3, 27, -1, "CNTR %s (A)", buf);
+    fw_textf(bmp, FONT5, 59, 27, -1, "INV (B)");
 
     /* BASS OCT, beside it */
     ch_label(bmp, 108, 56, "BASS");
     ch_label(bmp, 108, 49, "OCT");
     ch_fmt_bass(v.bass << 8, buf);
-    ch_big(bmp, 108, 35, buf);
+    ch_big(bmp, 108, 35, v.mode ? buf : "--");
     ch_small(bmp, 108, 27, "(D)");
 
     /* MODE, ROOT, SCALE, SHAPE */
