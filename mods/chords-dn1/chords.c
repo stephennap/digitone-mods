@@ -234,7 +234,7 @@ static int ch_view(struct ch_view *v)
     v->shape = ch_clamp(FW_SOUND_SLOT(kit, t, SLOT_SHAP) >> 8, 0, CH_SHAPES - 1);
     v->bass = ch_clamp(FW_SOUND_SLOT(kit, t, SLOT_BASS) >> 8, 0, BASSES - 1);
     v->center = ch_center[t];
-    v->root = FW_TRACK_ROOT(trk);
+    v->root = ch_clamp(FW_TRACK_ROOT(trk), 0, 127);
     v->scale = FW_TRACK_SCALE(trk);
     for (i = 0; i < CH_MAX_TONES; i++)
         v->last[i] = ch_last[t][i];
@@ -242,20 +242,35 @@ static int ch_view(struct ch_view *v)
 }
 
 /* ---- keys and knobs (the UI task) -------------------------------------------------------------- */
-/* While the page shows, TRIG 1-8 pick the active track's shape; their releases are taken too, so the
- * stock never sees half a press. Every key also gives us the brain for ev_draw. */
+/* While the page shows, TRIG 1-8 pick the active track's shape. A key's later events (its repeat,
+ * its release) go where its press went: to the mod only when the mod took the press, so the stock
+ * never sees half a press (a trig held on the note page, then TRIG to this page, then let go; or
+ * FUNC let go before the trig). Every key also gives us the brain for ev_draw. */
+static uint8_t ch_taken;                /* bit k: the mod took TRIG k+1's press */
+
 int32_t chords_key(void *brain, void *ev)
 {
-    uint32_t key = EV_KEY(ev), fl = EV_FLAGS(ev);
+    uint32_t key = EV_KEY(ev), fl = EV_FLAGS(ev), bit;
     int32_t t = fw_active_track;
 
     ch_brain = brain;
-    if (key < KEY_TRIG1 || key >= KEY_TRIG1 + CH_SHAPES || (fl & 2))   /* FUNC + TRIG stays stock */
+    if (key < KEY_TRIG1 || key >= KEY_TRIG1 + CH_SHAPES)
         return 0;
-    if (t < 0 || t >= SQ_AUDIO || !core_page_shown(brain, &chords_page))
+    bit = 1u << (key - KEY_TRIG1);
+    if (!(fl & 1) || (fl & 8)) {        /* a release (0x10, or 0 after another key went down) or a
+                                           hold (9): as its press went */
+        if (!(ch_taken & bit))
+            return 0;
+        if (!(fl & 1))
+            ch_taken &= (uint8_t)~bit;
+        return 1;
+    }
+    if ((fl & 2) || t < 0 || t >= SQ_AUDIO || !core_page_shown(brain, &chords_page)) {
+        ch_taken &= (uint8_t)~bit;      /* FUNC + TRIG, and every other page, stay stock */
         return 0;
-    if ((fl & 1) && !(fl & 8))
-        core_sound_set(t, SLOT_SHAP, (int32_t)(key - KEY_TRIG1) << 8);
+    }
+    ch_taken |= (uint8_t)bit;
+    core_sound_set(t, SLOT_SHAP, (int32_t)(key - KEY_TRIG1) << 8);
     return 1;
 }
 
