@@ -25,7 +25,7 @@ On a synth track, press TRIG (the note page) again: the Chords page.
 
 ```
 +-------------------------+ BASS
-| CHORDS T1               | OCT
+| CHORDS TRK 1            | OCT
 | [keyboard: the chord,   |  -1
 |  the center's arrow]    | (D)
 | CNTR C5 (A)    INV (B) |
@@ -47,16 +47,22 @@ CENTER   C5     DOR   1-3-5
 
 **A chord a trig.** Turned on their own, D, E and H set the sound, so every
 trig; turned while a trig is held, they p-lock that trig, as any knob does. So each trig can have its own MODE,
-SHAPE and BASS OCT. While a trig is held the title shows it (`T1  TRIG 5`)
+SHAPE and BASS OCT. While a trig is held the title shows it (`TRK 1  TRIG 5`)
 and the page shows that trig's values, on any of the 64 steps: the step is
 the one the Digitone's own grid marks as held.
 
 With a trig held, F is that trig's **NOTE**, its chord's root (the trig's own
 note, the one the note page shows), so each trig picks its chord in the key;
-with none held F is the track's ROOT, the key itself. CENTER, INV and SCALE
-(A, B, G) are the track's, not a trig's, as on the Digitone II: with a trig
-held they do nothing, so a turn meant for the trig cannot change every
-chord.
+with none held F is the track's ROOT, the key itself.
+
+With a trig held, A and B set **that trig's own CENTER** (A by semitones, B
+by inversions of the trig's chord), so each trig can be voiced on its own;
+the page marks it `CNTR C5*`. A trig with none follows the track's CENTER,
+which A and B set with no trig held. A trig's CENTER lives in the low byte
+of its SHAPE p-lock (8.8: the shape is the high byte; this slot is no stock
+sound parameter, so nothing else reads that byte), so it is saved, copied
+and pasted with the trig. SCALE (G) is the track's: with a trig held it does
+nothing, so a turn meant for the trig cannot change every chord.
 
 The keyboard shows two octaves with a dot on each note of the last chord
 the track played. Notes are named as the Digitone names them: MIDI 60 is C5.

@@ -93,6 +93,20 @@ static int32_t ch_value(int32_t track, int32_t step, int32_t slot, int32_t hi)
     return v < 0 ? 0 : v > hi ? hi : v;
 }
 
+/* A step's own CENTER: the low byte of its SHAPE p-lock (8.8: the shape the high byte; the stock
+ * neither reads nor writes that byte of this slot), 1-CENT_MAX; 0 none: the track's CENTER. */
+static int32_t ch_step_center(int32_t track, int32_t step)
+{
+    uint8_t *pat = fw_pattern;
+    const volatile uint8_t *p;
+    if (!pat || step < 0 || step >= SQ_STEPS)
+        return 0;
+    p = pat + LOCKS + TRACK_LOCKS * track + STEP_LOCKS * step + 2 * SLOT_SHAP;
+    if (p[0] & 0x80)                    /* no lock */
+        return 0;
+    return p[1] <= CENT_MAX ? p[1] : 0;
+}
+
 /* Interrupt level, after every note generator. */
 void chords_notes(int32_t track, int32_t step, int8_t notes[SQ_NOTES])
 {
@@ -109,7 +123,9 @@ void chords_notes(int32_t track, int32_t step, int8_t notes[SQ_NOTES])
             ;
         if (i == SQ_NOTES && sq_track_info(track, &info, sizeof info) >= 0 &&
             info.root != SQ_ROOT_NONE) {
-            c = ch_center[track];
+            c = ch_step_center(track, step);               /* the trig's own, else the track's */
+            if (!c)
+                c = ch_center[track];
             center = c ? CENT_BASE + c : notes[0];
             n = ch_chord(notes[0], info.root, info.scale, ch_value(track, step, SLOT_SHAP, CH_TYPES - 1),
                          mode - 1, center, ch_value(track, step, SLOT_BASS, BASSES - 1), out);
@@ -229,6 +245,7 @@ struct core_page chords_page = {
 struct ch_view {
     int32_t track, step, mode, shape, bass, center, root, scale;    /* step: the held trig's, or -1 */
     int32_t note;                       /* the held trig's note (its chord's root), or -1 */
+    int32_t own;                        /* the held trig has its own CENTER */
     int8_t last[CH_MAX_TONES];
 };
 
@@ -277,7 +294,8 @@ static int ch_view(struct ch_view *v)
     v->mode = ch_value(t, v->step, SLOT_MODE, MODES - 1);
     v->shape = ch_value(t, v->step, SLOT_SHAP, ch_shape_count(v->scale) - 1);
     v->bass = ch_value(t, v->step, SLOT_BASS, BASSES - 1);
-    v->center = ch_center[t];
+    v->own = ch_step_center(t, v->step);
+    v->center = v->own ? v->own : ch_center[t];
     v->root = ch_clamp(FW_TRACK_ROOT(trk), 0, 127);
     v->note = v->step >= 0 ? (int8_t)trk[TR_STEP_NOTES + 8 * v->step] : -1;
     for (i = 0; i < CH_MAX_TONES; i++)
@@ -335,7 +353,7 @@ static uint32_t ch_pcs_of(const struct ch_view *v)
  * the value (8.8) in the step's row, the row's count, the track's used flag, and a lock trig on a
  * step with no trig. The TRIG key's pages do not p-lock sound slots themselves, so the mod does.
  * The rows are big-endian, at odd addresses on odd tracks: by bytes. UI task. */
-static void ch_lock_set(int32_t track, int32_t step, int32_t slot, int32_t value)
+static void ch_lock_set(int32_t track, int32_t step, int32_t slot, int32_t value)     /* value: 8.8 */
 {
     uint8_t *pat = fw_pattern, *t, *row;
     volatile uint16_t *w;
@@ -345,7 +363,6 @@ static void ch_lock_set(int32_t track, int32_t step, int32_t slot, int32_t value
         return;
     t = pat + LOCKS + TRACK_LOCKS * track;
     row = t + STEP_LOCKS * step;
-    value <<= 8;
     row[2 * slot] = (uint8_t)(value >> 8);
     row[2 * slot + 1] = (uint8_t)value;
     for (k = 0; k < SLOTS; k++)         /* the row's count (0x40023ed2) */
@@ -359,9 +376,39 @@ static void ch_lock_set(int32_t track, int32_t step, int32_t slot, int32_t value
         *w = (uint16_t)(*w | FW_STEP_LOCK_TRIG);        /* a lock trig carries the step's locks */
 }
 
+/* The note classes of a trig's chord, played as ROOT plays it: what knob B steps through. */
+static uint32_t ch_pcs_note(const struct ch_view *v, int32_t note)
+{
+    int8_t out[CH_MAX_TONES];
+    uint32_t m = 0;
+    int32_t i, k = ch_chord(note, v->root, v->scale, v->shape, CH_ROOT, 0, 0, out);
+    if (k <= 0)
+        return 1u << (note % 12);
+    for (i = 0; i < k; i++)
+        m |= 1u << ((out[0] + (i ? out[i] : 0)) % 12);
+    return m;
+}
+
+/* CENTER a turn of A (d semitones) or B (d inversions) makes of c (0 AUTO: from the note). */
+static int32_t ch_center_turn(int32_t c, int32_t e, int32_t d, int32_t note, uint32_t pcs)
+{
+    int32_t n = c ? CENT_BASE + c : note;
+    if (e == 1) {
+        if (!c)                         /* from AUTO: the note, as a fixed center */
+            n -= d > 0 ? 1 : -1;
+        n += d;
+    } else {
+        for (; d > 0; d--)
+            n = ch_inversion(pcs, n, 1);
+        for (; d < 0; d++)
+            n = ch_inversion(pcs, n, -1);
+    }
+    return ch_clamp(n, CENT_BASE + 1, CENT_BASE + CENT_MAX) - CENT_BASE;
+}
+
 /* While the page shows, these knobs are ours: A CENTER, B its inversion steps, F ROOT, G SCALE (C
- * does nothing); D, E and H are the stock's, the sound's. With a trig held: F its note, D, E, H its
- * p-locks (ch_lock_set), A, B, G nothing. */
+ * does nothing); D, E and H are the stock's, the sound's. With a trig held: A, B its own CENTER (in
+ * its SHAPE p-lock's low byte), F its note, D, E, H its p-locks (ch_lock_set), G nothing. */
 int32_t chords_enc(void *brain, void *ev)
 {
     uint32_t e = EV_KEY(ev);
@@ -381,20 +428,24 @@ int32_t chords_enc(void *brain, void *ev)
     if (!d)
         return 1;
     trk = FW_TRACK(fw_pattern, v.track);
-    if (ch_held_key >= 0) {             /* a trig held: F is its note, D, E, H its p-locks; the
-                                           track's A, B, G wait */
+    if (ch_held_key >= 0) {             /* a trig held: A, B its CENTER, F its note, D, E, H its
+                                           p-locks; the track's SCALE (G) waits */
+        int32_t note;
         if (v.step < 0)
             return 1;
+        note = v.note >= 0 ? v.note : FW_TRACK_NOTE(trk);
         if (e == 6) {
-            int32_t n = v.note >= 0 ? v.note : FW_TRACK_NOTE(trk);
-            trk[TR_STEP_NOTES + 8 * v.step] = (uint8_t)ch_clamp(n + d, 0, 127);
+            trk[TR_STEP_NOTES + 8 * v.step] = (uint8_t)ch_clamp(note + d, 0, 127);
         } else if (e == 4) {
-            ch_lock_set(v.track, v.step, SLOT_BASS, ch_clamp(v.bass + d, 0, BASSES - 1));
+            ch_lock_set(v.track, v.step, SLOT_BASS, ch_clamp(v.bass + d, 0, BASSES - 1) << 8);
         } else if (e == 5) {
-            ch_lock_set(v.track, v.step, SLOT_MODE, ch_clamp(v.mode + d, 0, MODES - 1));
-        } else if (e == 8) {
+            ch_lock_set(v.track, v.step, SLOT_MODE, ch_clamp(v.mode + d, 0, MODES - 1) << 8);
+        } else if (e == 8) {            /* the shape; its own CENTER, the low byte, kept */
             ch_lock_set(v.track, v.step, SLOT_SHAP,
-                        ch_clamp(v.shape + d, 0, ch_shape_count(v.scale) - 1));
+                        ch_clamp(v.shape + d, 0, ch_shape_count(v.scale) - 1) << 8 | v.own);
+        } else if (e == 1 || e == 2) {  /* its own CENTER, from the track's at first */
+            ch_lock_set(v.track, v.step, SLOT_SHAP, v.shape << 8 |
+                        ch_center_turn(v.center, (int32_t)e, d, note, ch_pcs_note(&v, note)));
         }
         return 1;
     }
@@ -587,11 +638,11 @@ void chords_draw(void *bmp, void *ctrl)
     /* the keyboard box: its title bar, the keyboard, CENTER */
     fw_framerect(bmp, 0, 24, 88, 63, 1);
     if (ch_held_key >= 0 && v.step >= 0)            /* a held trig's chord: its step */
-        fw_textf(bmp, FONT_TTL, 3, 56, -1, "T%d  TRIG %d", (int)v.track + 1, (int)v.step + 1);
+        fw_textf(bmp, FONT_TTL, 3, 56, -1, "TRK %d  TRIG %d", (int)v.track + 1, (int)v.step + 1);
     else if (ch_held_key >= 0)                      /* a long track: turn a knob to find it */
-        fw_textf(bmp, FONT_TTL, 3, 56, -1, "T%d  TRIG ?", (int)v.track + 1);
+        fw_textf(bmp, FONT_TTL, 3, 56, -1, "TRK %d  TRIG ?", (int)v.track + 1);
     else
-        fw_textf(bmp, FONT_TTL, 3, 56, -1, "CHORDS T%d", (int)v.track + 1);
+        fw_textf(bmp, FONT_TTL, 3, 56, -1, "CHORDS TRK %d", (int)v.track + 1);
     ch_rect(bmp, 1, 55, 87, 62, -1);
     center = v.center ? CENT_BASE + v.center : -1;
     lo = v.last[0] >= 0 ? v.last[0] : v.root;
@@ -605,7 +656,7 @@ void chords_draw(void *bmp, void *ctrl)
         ch_note_name(buf, center);
     else
         ch_text(buf, "AUTO");
-    fw_textf(bmp, FONT5, 3, 27, -1, "CNTR %s (A)", buf);
+    fw_textf(bmp, FONT5, 3, 27, -1, "CNTR %s%s (A)", buf, v.own ? "*" : "");    /* *: the trig's own */
     fw_textf(bmp, FONT5, 59, 27, -1, "INV (B)");
 
     /* BASS OCT, beside it */
