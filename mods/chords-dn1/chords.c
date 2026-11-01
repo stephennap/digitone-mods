@@ -22,7 +22,7 @@
  *
  * With MODE on, each single-note trig on the track plays the chord from ROOT and SCALE, and so does
  * each note played on the TRIG keys in keyboard mode or over MIDI (live.s). Trigs that hold a chord
- * play as stored. */
+ * play as stored. The TRIG key's third page, Retrig, repeats a trig (retrig.inc, included at the end). */
 #include "digitone-mk1/core3.h"
 #include "digitone-mk1/seq.h"
 #include "chordmath.h"
@@ -354,6 +354,8 @@ static int ch_view(struct ch_view *v)
     return 1;
 }
 
+static int32_t rt_lo(int32_t track, int32_t step, int32_t slot);    /* retrig.inc */
+
 /* ---- keys and knobs (the UI task) -------------------------------------------------------------- */
 /* The TRIG keys stay the stock's; the mod only watches which one is held, to show and edit that
  * trig's chord. Its step comes from the grid's own held-steps mask (ch_held_mask), which the stock
@@ -487,10 +489,12 @@ int32_t chords_enc(void *brain, void *ev)
         note = v.note >= 0 ? v.note : FW_TRACK_NOTE(trk);
         if (e == 6) {
             trk[TR_STEP_NOTES + 8 * v.step] = (uint8_t)ch_clamp(note + d, 0, 127);
-        } else if (e == 4) {
-            ch_lock_set(v.track, v.step, SLOT_BASS, ch_clamp(v.bass + d, 0, BASSES - 1) << 8);
+        } else if (e == 4) {            /* the low byte, RETRIG's, kept (retrig.inc) */
+            ch_lock_set(v.track, v.step, SLOT_BASS,
+                        ch_clamp(v.bass + d, 0, BASSES - 1) << 8 | rt_lo(v.track, v.step, SLOT_BASS));
         } else if (e == 5) {
-            ch_lock_set(v.track, v.step, SLOT_MODE, ch_clamp(v.mode + d, 0, MODES - 1) << 8);
+            ch_lock_set(v.track, v.step, SLOT_MODE,
+                        ch_clamp(v.mode + d, 0, MODES - 1) << 8 | rt_lo(v.track, v.step, SLOT_MODE));
         } else if (e == 8) {            /* the shape; its own CENTER, the low byte, kept */
             ch_lock_set(v.track, v.step, SLOT_SHAP,
                         ch_clamp(v.shape + d, 0, ch_shape_count(v.scale) - 1) << 8 | v.own);
@@ -609,7 +613,7 @@ static const struct { char c; uint8_t r[5]; } ch_glyphs[] = {
     {'O', {2, 5, 5, 5, 2}}, {'P', {6, 5, 6, 4, 4}}, {'Q', {2, 5, 5, 6, 3}}, {'R', {6, 5, 6, 5, 5}},
     {'S', {3, 4, 2, 1, 6}}, {'T', {7, 2, 2, 2, 2}}, {'U', {5, 5, 5, 5, 7}}, {'V', {5, 5, 5, 5, 2}},
     {'W', {5, 5, 7, 7, 5}}, {'X', {5, 5, 2, 5, 5}}, {'Y', {5, 5, 2, 2, 2}}, {'Z', {7, 1, 2, 4, 7}},
-    {'#', {5, 7, 5, 7, 5}}, {'-', {0, 0, 7, 0, 0}},
+    {'#', {5, 7, 5, 7, 5}}, {'-', {0, 0, 7, 0, 0}}, {'/', {1, 1, 2, 4, 4}}, {'.', {0, 0, 0, 0, 2}},
 };
 
 static void ch_big(void *bmp, int32_t cx, int32_t y, const char *s)     /* 6 x 10 a char, centred */
@@ -745,3 +749,5 @@ void chords_draw(void *bmp, void *ctrl)
         ch_small(bmp, 16 + 32 * i, 0, buf);
     }
 }
+
+#include "retrig.inc"

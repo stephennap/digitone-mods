@@ -350,6 +350,94 @@ def stock_image():
     return formats.main_image(st, dev)
 
 
+# ---- RETRIG (retrig.inc): its tables, its storage in the MODE and BASS locks' low bytes, its fade
+
+def retrig_source():
+    with open(os.path.join(HERE, '..', 'mods', 'chords-dn1', 'retrig.inc')) as f:
+        return f.read()
+
+
+def retrig_table(name):
+    m = re.search(r'%s\[[A-Z_]+\] = \{([^}]*)\}' % name, retrig_source())
+    return [x.strip() for x in m.group(1).split(',')]
+
+
+RT_BAR = 86400000
+RT_EIGHTH = 675000
+
+
+def rt_store(rate, length, vel):          # retrig.inc's rt_write, as the two low bytes
+    return rate, ((length - 5) & 15) | (vel & 15) << 4
+
+
+def rt_load(mode_lo, bass_lo):            # its rt_read
+    v = (bass_lo ^ 0x80) - 0x80
+    return (mode_lo if mode_lo < 18 else 0), (bass_lo + 5) & 15, v >> 4
+
+
+def rt_vel(v0, f, p):                     # its rt_vel (C division truncates toward 0)
+    n = v0 * (2048 + f * p) if f < 0 else v0 * (2048 - f * (256 - p))
+    v = int(n / 2048)
+    return max(1, min(127, v))
+
+
+def test_retrig_rates_are_whole_intervals():
+    rates = [int(x) for x in retrig_table('rt_rates')]
+    assert rates[0] == 0 and len(rates) == 18 and rates[1:] == sorted(rates[1:])
+    assert rates[1:] == [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 64, 80]    # the Digitakt's
+    for n in rates[1:]:
+        assert RT_BAR % n == 0, n
+
+
+def test_retrig_lens_and_names_agree():
+    lens = [int(x) for x in retrig_table('rt_lens')]
+    names = [x.strip('"') for x in retrig_table('rt_len_names')]
+    assert len(lens) == len(names) == 16 and lens[15] == 0 and names[15] == 'INF'
+    for e, name in zip(lens[:15], names[:15]):
+        if '/' in name:
+            a, b = name.split('/')
+            assert e * int(b) == 8 * int(a), name
+        else:
+            assert e == 8 * float(name), name
+    assert lens[5] == 8                     # a fresh lock's 0 is one step
+
+
+def test_retrig_storage_round_trips():
+    for rate in range(18):
+        for length in range(16):
+            for vel in range(-8, 8):
+                mode_lo, bass_lo = rt_store(rate, length, vel)
+                assert 0 <= mode_lo < 256 and 0 <= bass_lo < 256
+                assert rt_load(mode_lo, bass_lo) == (rate, length, vel)
+    assert rt_store(0, 5, 0) == (0, 0)      # retrig off, defaults: no lock is written
+
+
+def test_retrig_never_reads_as_a_knob_lock():
+    # with no MODE or BASS lock, retrig writes the high byte 0x80: negative, not -1, so ch_value
+    # (v < 0: the sound's) and the rows' count (bit 7: none) read no lock
+    for lo in range(1, 256):
+        v = (0x80 << 8 | lo) - 0x10000
+        assert v < 0 and v != -1
+
+
+def test_retrig_fade():
+    assert rt_vel(100, 0, 0) == rt_vel(100, 0, 256) == 100
+    assert rt_vel(100, -8, 0) == 100 and rt_vel(100, -8, 256) == 1      # fades out to nothing
+    assert rt_vel(100, -4, 256) == 50
+    assert rt_vel(120, 7, 0) == 15 and rt_vel(120, 7, 256) == 120       # fades in from an eighth
+    for f in range(-8, 8):
+        seq = [rt_vel(127, f, p) for p in range(0, 257, 16)]
+        assert seq == (sorted(seq) if f > 0 else sorted(seq, reverse=True)), f
+
+
+def test_retrig_page_glyphs():
+    # every character the page draws big has a glyph in chords.c's font
+    with open(os.path.join(HERE, '..', 'mods', 'chords-dn1', 'chords.c')) as f:
+        glyphs = set(re.findall(r"\{'(.)', \{", f.read()))
+    names = [x.strip('"') for x in retrig_table('rt_len_names')]
+    drawn = set(''.join(names)) | set('OFF1/80') | set('-0123456789')
+    assert drawn <= glyphs, drawn - glyphs
+
 if __name__ == '__main__':
     ok = bad = skip = 0
     for n in sorted(k for k in list(globals()) if k.startswith('test_')):

@@ -13,13 +13,16 @@ track's channel. Played live, the chord is held as long as the key, so the
 first note of a chord a trig plays from the sequencer, the Note Add menu's
 chords too: to arpeggiate a chord, play it.)
 
+The TRIG key's third page, **Retrig**, repeats a trig as the Digitakt's
+retrig does: per trig, a RATE, a LEN and a velocity fade (below).
+
 | | |
 |---|---|
-| needs | core-dn1 3.3 or newer (parameter slots, mod pages, project data, `fw_pattern`), seq-events |
-| sites | one, the played note's: 0x400ff1d6 (1.44 0x400ff44a), in the builder of a played note's event; and `ev_fire_notes`, `ev_key`, `ev_enc`, `ev_tick`, `ev_draw`, three `core_params`, a `core_pages` and a `core_projdata` entry |
-| claims | `param:182`-`184`, `page:27` (after page 1, the TRIG key's Trig Parameters), `projdata:CHRD`, and sound slots 26, 65 and 0 (so not with digitables or machines) |
-| RAM | 7.4 KB code |
-| sources | [chords.c](chords.c) (the page, its knobs, the handlers), [chordmath.h](chordmath.h) (the chord math, no firmware), [live.s](live.s) (the played note's site) |
+| needs | core-dn1 4.1 or newer (parameter slots, mod pages, project data, `fw_pattern`, `ev_note_queue`), seq-events |
+| sites | one, the played note's: 0x400ff1d6 (1.44 0x400ff44a), in the builder of a played note's event; and `ev_fire_notes`, `ev_fire_vel`, `ev_note_queue`, `ev_render_out`, `ev_key`, `ev_enc`, `ev_tick`, `ev_draw`, three `core_params`, two `core_pages` and a `core_projdata` entry |
+| claims | `param:182`-`184`, `page:27` and `page:28` (after page 1, the TRIG key's Trig Parameters: Chords, then Retrig), `projdata:CHRD`, and sound slots 26, 65 and 0 (so not with digitables or machines) |
+| RAM | 15.3 KB code, 6 KB data (0.14) |
+| sources | [chords.c](chords.c) (the page, its knobs, the handlers), [chordmath.h](chordmath.h) (the chord math, no firmware), [live.s](live.s) (the played note's site), [retrig.inc](retrig.inc) (RETRIG, included by chords.c) |
 | tests | [tests/test_chords_dn1.py](../../tests/test_chords_dn1.py) |
 
 ## Using it
@@ -99,6 +102,48 @@ scale.
 It plays as stock when it cannot say: a trig that already holds a chord, a
 note outside the scale, or a chord that would leave the MIDI range.
 
+## Retrig
+
+Press TRIG a third time: the Retrig page. Hold a trig and turn:
+
+| knob | | |
+|---|---|---|
+| E | RATE | OFF, 1/1 to 1/80: hits a bar (1/16 is one a step), the Digitakt's rates |
+| F | LEN | how long it repeats: 1/8 of a step to 32 steps, or INF (until the track's next trig, or STOP) |
+| G | VEL | the velocity over LEN: -128 fades out to nothing, 0 keeps it, 112 fades in from an eighth (the trig itself too) |
+
+The page draws the hits over LEN (INF: a bar), each as tall as its
+velocity. Each hit is the trig's whole event again: its chord, its length
+and its p-locks. With no trig held the page shows nothing to set: RETRIG is
+a trig's, not a track's.
+
+**Storage.** The mk1 has no sound slot left, so a trig's RATE is the low
+byte of its MODE p-lock, and LEN (low nibble, stored as the index - 5, so 0
+is one step) and VEL (high nibble, -8..7 sixteenths of 128) the low byte of
+its BASS OCT p-lock. D and E keep that byte when they set the lock. A trig
+with no MODE or BASS OCT lock gets the high byte 0x80: a negative value
+that is not -1, which `ch_value` and the rows' lock count (the stock's,
+0x40023ed2, tests bit 7) read as no lock, so RETRIG never fixes a trig's
+MODE or BASS OCT. Setting both back to their defaults (OFF; LEN 1, VEL 0)
+on such a trig writes -1 again.
+
+**Playback.** On a retrig trig's fire `retrig_notes` (`ev_fire_notes`)
+marks the track; `retrig_queue` (core 4.1's `ev_note_queue`, masked) takes
+the event the fire then queues, with its time, and keeps a copy of it,
+with a reference to its p-lock list (the list's count at +0; the
+firmware's own event copy, 0x400ffde8, takes one the same way, and its
+release, 0x400ffd50, puts a list back on `fw_locks_free` at 0). The
+render's exit (`retrig_render`, `ev_render_out`) queues a fresh event
+(`fw_ev_alloc`, a copy, +0x44 the queue's link cleared, its own reference)
+for each hit half a step before its time, with the faded velocity at
++0x10 (velocity << 8), through `fw_ev_queue`, masked, and only with a free
+queue time (`fw_nodes_free`). A hit whose event or time is not to be had
+is skipped. Any newer note trig on the track ends the retrig at its time;
+STOP or pause ends all; a first step's event (kind 1) plays its hits as
+fires (kind 0) with no p-lock list. Eight retrigs play at once, the oldest
+giving way. With a fade in, `retrig_vel` (`ev_fire_vel`) lowers the trig's
+own velocity to the fade's start.
+
 ## How it works
 
 `chords_notes` runs on `ev_fire_notes` (seq-events, after every note
@@ -172,7 +217,10 @@ or BASS OCT: set both once on the page. CENTER starts at AUTO.
 
 ## Not checked yet
 
-- Not yet run on a unit: chords on the TRIG keys and over MIDI, with and
+- Not yet run on a unit: RETRIG (the hits' timing, the velocity fade, INF
+  and its end at the next trig, STOP, a pattern change, a retrig on the
+  first step, voices at 1/80 with a long note: a hit keeps the trig's
+  length, so long notes overlap); chords on the TRIG keys and over MIDI, with and
   without the arpeggiator; p-locking D, E and H with a trig held, BASS OCT's
   p-locks (slot 0) as played, and the held trig's values on the page, on
   steps 17-64 too (the grid's page read from its state).
