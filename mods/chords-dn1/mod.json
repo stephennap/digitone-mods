@@ -1,14 +1,17 @@
 {
- "id": "chords", "version": "0.4",
+ "id": "chords", "version": "0.5",
  "license": "GPL-2.0-or-later",
  "title": "CHORDS (keyboard chord modes)", "category": "Sequencer", "author": "stephen",
- "description": "The Digitone II's chord modes for the Digitone mk1 and Digitone Keys, on the TRIG key's second page, Chords: MODE (OFF, or CHORD ROOT, CENTER or SPREAD with BASS OCT 0 to -3), SHAP (eight shapes, also on TRIG 1-8 while the page shows: 1-3-5, 1-3-5-7 ... in a scale, MAJ, MIN, 7TH ... on chromatic) and CENT (the center position). With MODE on, each single-note trig on the track plays that chord from the track's keyboard ROOT and SCALE; trigs that hold a chord play as stored. The sequencer's trigs only for now, not the TRIG keys played live. Needs core-dn1 3.3 and seq-events.",
+ "description": "The Digitone II's chord modes for the Digitone mk1 and Digitone Keys, on the TRIG key's second page, Chords, drawn after the Digitone II's keyboard setup screen: a keyboard with the last chord and the CENTER arrow (knob A), BASS OCT (D), MODE (E: OFF, CHORD ROOT, CENTER, SPREAD), the track's keyboard ROOT (F) and SCALE (G), and SHAPE (H; TRIG 1-8 too). With MODE on, each single-note trig on the track plays that chord from ROOT and SCALE; trigs that hold a chord play as stored. The sequencer's trigs only for now, not the TRIG keys played live. Needs core-dn1 3.3 and seq-events.",
  "device": "digitone-mk1", "os": "1.43",
  "ports": {"1.44": {}},
  "sources": ["chords.c"],
  "subscribe": [
   {"event": "ev_fire_notes", "fn": "chords_notes", "order": 50},
-  {"event": "ev_key", "fn": "chords_key", "order": 50}
+  {"event": "ev_key", "fn": "chords_key", "order": 50},
+  {"event": "ev_enc", "fn": "chords_enc", "order": 50},
+  {"event": "ev_tick", "fn": "chords_tick", "order": 50},
+  {"event": "ev_draw", "fn": "chords_draw", "order": 50}
  ],
  "contribute": [
   {"to": "core_params", "order": 50, "data": "00000000",
@@ -16,10 +19,12 @@
   {"to": "core_params", "order": 51, "data": "00000000",
    "relocs": [[0, "abs32", "sym:chords_shap", 0]]},
   {"to": "core_params", "order": 52, "data": "00000000",
-   "relocs": [[0, "abs32", "sym:chords_cent", 0]]},
+   "relocs": [[0, "abs32", "sym:chords_bass", 0]]},
   {"to": "core_pages", "order": 50, "data": "00000000",
-   "relocs": [[0, "abs32", "sym:chords_page", 0]]}
+   "relocs": [[0, "abs32", "sym:chords_page", 0]]},
+  {"to": "core_projdata", "order": 50, "data": "00000000",
+   "relocs": [[0, "abs32", "sym:chords_projdata", 0]]}
  ],
- "resources": {"names": ["param:182", "param:183", "param:184", "page:27"], "core": "3.3"},
+ "resources": {"names": ["param:182", "param:183", "param:184", "page:27", "projdata:CHRD"], "core": "3.3"},
  "requires": ["core", "seq-events"]
 }
