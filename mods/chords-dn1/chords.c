@@ -15,7 +15,9 @@
  *
  * A  CENTER POSITION: AUTO (the played note) or C3-C8 (MIDI 36-96); the track's, saved with the project
  * B  CENTER POSITION to the next or the last inversion of the chord (the Digitone II's [+]/[-])
- * D  BASS OCT 0 to -3 (with MODE on: "--" with it off), E  MODE (OFF, CHORD ROOT, CENTER, SPREAD), H  SHAPE (TRIG 1-8 too): the sound's
+ * D  BASS OCT 0 to -3 (with MODE on: "--" with it off), E  MODE (OFF, CHORD ROOT, CENTER, SPREAD),
+ * H  SHAPE: the sound's, as stock knobs, so a trig held while one turns p-locks it (a chord a trig);
+ *    while a trig is held the page shows its chord
  * F  ROOT and G  SCALE: the track's keyboard ROOT and SCALE themselves
  *
  * With MODE on, each single-note trig on the track plays the chord from ROOT and SCALE. Trigs that
@@ -70,13 +72,13 @@ static void ch_loaded(int32_t found)
 struct core_projdata chords_projdata = { 0x43485244u /* "CHRD" */, 4, ch_center, ch_loaded };
 
 /* ---- the chords ------------------------------------------------------------------------------- */
-/* A knob's value as this step plays it, 8.8 >> 8: its p-lock, else the sound's. Slot 0's lock is not
- * read: fxkit-dn1 treats slot 0 in a lock row as no slot. */
+/* A knob's value as this step plays it, 8.8 >> 8: its p-lock, else the sound's. step < 0: the
+ * sound's. A lock row holds every slot, slot 0 too (fxkit-dn1 counts it in a row's locks). */
 static int32_t ch_value(int32_t track, int32_t step, int32_t slot, int32_t hi)
 {
     uint8_t *pat = fw_pattern, *kit = fw_kit;
     int32_t v = -1;
-    if (slot > 0 && pat && step >= 0 && step < SQ_STEPS) {
+    if (slot >= 0 && pat && step >= 0 && step < SQ_STEPS) {
         const volatile uint8_t *p = pat + LOCKS + TRACK_LOCKS * track + STEP_LOCKS * step + 2 * slot;
         v = (int16_t)(p[0] << 8 | p[1]);
     }
@@ -210,17 +212,22 @@ const struct core_param chords_bass = {
 };
 
 /* The TRIG key's second page, after page 1, the synth tracks' Trig Parameters (a kind-9 page like
- * the sound pages: 1.43 builds it at 0x4016ac30). The MIDI tracks' TRIG page, 19, has none. No stock
- * knobs: the mod draws it and turns its knobs. Core writes view and pos. */
+ * the sound pages: 1.43 builds it at 0x4016ac30). The MIDI tracks' TRIG page, 19, has none. D, E and
+ * H are stock knobs (BASS OCT, MODE, SHAPE): the stock turns them, and with a trig held p-locks them,
+ * as any knob. A, B, F and G are the mod's. The mod draws the page over the stock's. Core writes
+ * view and pos. */
 struct core_page chords_page = {
-    27, 1, "CHRD", "Chords", { 0, 0, 0, 0, 0, 0, 0, 0 }, 9, 0, 0
+    27, 1, "CHRD", "Chords", { 0, 0, 0, ID_BASS, ID_MODE, 0, 0, ID_SHAP }, 9, 0, 0
 };
 
 /* ---- the page's state, as it shows ------------------------------------------------------------ */
 struct ch_view {
-    int32_t track, mode, shape, bass, center, root, scale;
+    int32_t track, step, mode, shape, bass, center, root, scale;    /* step: the held trig's, or -1 */
     int8_t last[CH_MAX_TONES];
 };
+
+static int32_t ch_held_key = -1;        /* the TRIG key held (0-15), or -1 */
+static int32_t ch_held_step = -1;       /* its step, once known, or -1 */
 
 static int ch_shown(void)
 {
@@ -235,10 +242,11 @@ static int ch_view(struct ch_view *v)
         return 0;
     trk = FW_TRACK(pat, t);
     v->track = t;
-    v->mode = ch_clamp(FW_SOUND_SLOT(kit, t, SLOT_MODE) >> 8, 0, MODES - 1);
+    v->step = ch_held_key >= 0 ? ch_held_step : -1;     /* a held trig: its p-locks, else the sound */
     v->scale = FW_TRACK_SCALE(trk);
-    v->shape = ch_clamp(FW_SOUND_SLOT(kit, t, SLOT_SHAP) >> 8, 0, ch_shape_count(v->scale) - 1);
-    v->bass = ch_clamp(FW_SOUND_SLOT(kit, t, SLOT_BASS) >> 8, 0, BASSES - 1);
+    v->mode = ch_value(t, v->step, SLOT_MODE, MODES - 1);
+    v->shape = ch_value(t, v->step, SLOT_SHAP, ch_shape_count(v->scale) - 1);
+    v->bass = ch_value(t, v->step, SLOT_BASS, BASSES - 1);
     v->center = ch_center[t];
     v->root = ch_clamp(FW_TRACK_ROOT(trk), 0, 127);
     for (i = 0; i < CH_MAX_TONES; i++)
@@ -247,36 +255,28 @@ static int ch_view(struct ch_view *v)
 }
 
 /* ---- keys and knobs (the UI task) -------------------------------------------------------------- */
-/* While the page shows, TRIG 1-8 pick the active track's shape. A key's later events (its repeat,
- * its release) go where its press went: to the mod only when the mod took the press, so the stock
- * never sees half a press (a trig held on the note page, then TRIG to this page, then let go; or
- * FUNC let go before the trig). Every key also gives us the brain for ev_draw. */
-static uint8_t ch_taken;                /* bit k: the mod took TRIG k+1's press */
-
+/* The TRIG keys stay the stock's (a trig held and a knob turned p-locks it); the mod only watches
+ * which one is held, to show that trig's chord. Its step is the key's on a track of up to 16 steps;
+ * on a longer one (pages the mod cannot see) it is the step whose lock changes while the key is held
+ * (chords_tick). Every key also gives us the brain for ev_draw. */
 int32_t chords_key(void *brain, void *ev)
 {
-    uint32_t key = EV_KEY(ev), fl = EV_FLAGS(ev), bit;
-    int32_t t = fw_active_track;
+    uint32_t key = EV_KEY(ev), fl = EV_FLAGS(ev);
+    int32_t k = (int32_t)key - KEY_TRIG1, t = fw_active_track;
+    struct sq_track info;
 
     ch_brain = brain;
-    if (key < KEY_TRIG1 || key >= KEY_TRIG1 + CH_SHAPES)
+    if (k < 0 || k >= 16)
         return 0;
-    bit = 1u << (key - KEY_TRIG1);
-    if (!(fl & 1) || (fl & 8)) {        /* a release (0x10, or 0 after another key went down) or a
-                                           hold (9): as its press went */
-        if (!(ch_taken & bit))
-            return 0;
-        if (!(fl & 1))
-            ch_taken &= (uint8_t)~bit;
-        return 1;
+    if (!(fl & 1)) {                    /* a release (0x10, or 0 after another key went down) */
+        if (k == ch_held_key)
+            ch_held_key = ch_held_step = -1;
+    } else if (!(fl & 8) && !(fl & 2)) {        /* a press, not FUNC + TRIG */
+        ch_held_key = k;
+        ch_held_step = t >= 0 && t < SQ_AUDIO && sq_track_info(t, &info, sizeof info) >= 0 &&
+                       info.len <= 16 ? k : -1;
     }
-    if ((fl & 2) || t < 0 || t >= SQ_AUDIO || !core_page_shown(brain, &chords_page)) {
-        ch_taken &= (uint8_t)~bit;      /* FUNC + TRIG, and every other page, stay stock */
-        return 0;
-    }
-    ch_taken |= (uint8_t)bit;
-    core_sound_set(t, SLOT_SHAP, (int32_t)(key - KEY_TRIG1) << 8);
-    return 1;
+    return 0;
 }
 
 /* The note classes of the chord knob B turns through: the last one the track played, else what its ROOT
@@ -299,8 +299,8 @@ static uint32_t ch_pcs_of(const struct ch_view *v)
     return m;
 }
 
-/* While the page shows, its knobs are ours: A CENTER, B its inversion steps, D BASS OCT, E MODE,
- * F ROOT, G SCALE, H SHAPE. */
+/* While the page shows, these knobs are ours: A CENTER, B its inversion steps, F ROOT, G SCALE (C
+ * does nothing). D, E and H are the stock's, so a held trig p-locks them. */
 int32_t chords_enc(void *brain, void *ev)
 {
     uint32_t e = EV_KEY(ev);
@@ -309,7 +309,8 @@ int32_t chords_enc(void *brain, void *ev)
     int32_t d, i;
 
     ch_brain = brain;
-    if (e < 1 || e > 8 || !core_page_shown(brain, &chords_page) || !ch_view(&v))
+    if (e < 1 || e > 8 || e == 4 || e == 5 || e == 8 || !core_page_shown(brain, &chords_page) ||
+        !ch_view(&v))
         return 0;
     i = (int32_t)e - 1;
     ch_acc[i] += EV_DELTA(ev);
@@ -332,25 +333,38 @@ int32_t chords_enc(void *brain, void *ev)
         ch_center[v.track] = (uint8_t)(ch_clamp(c, CENT_BASE + 1, CENT_BASE + CENT_MAX) - CENT_BASE);
         break;
     }
-    case 4:
-        if (!v.mode)                    /* BASS OCT is the chord modes' */
-            break;
-        core_sound_set(v.track, SLOT_BASS, ch_clamp(v.bass + d, 0, BASSES - 1) << 8);
-        break;
-    case 5:
-        core_sound_set(v.track, SLOT_MODE, ch_clamp(v.mode + d, 0, MODES - 1) << 8);
-        break;
     case 6:
         trk[0x3cb] = (uint8_t)ch_clamp(v.root + d, 0, ROOT_MAX);
         break;
     case 7:
         trk[0x3ce] = (uint8_t)(int8_t)ch_clamp(v.scale + d, -1, SCALE_MAX);
         break;
-    case 8:
-        core_sound_set(v.track, SLOT_SHAP, ch_clamp(v.shape + d, 0, ch_shape_count(v.scale) - 1) << 8);
-        break;
     }
     return 1;
+}
+
+/* The active track's locks of MODE, SHAPE and BASS OCT, as last seen: a change while a TRIG key is
+ * held says which step it holds (on a track longer than 16 steps). */
+static int16_t ch_seen[SQ_STEPS][3];
+static int32_t ch_seen_track = -1;
+
+static void ch_watch_locks(int32_t track)
+{
+    static const uint8_t slots[3] = { SLOT_MODE, SLOT_SHAP, SLOT_BASS };
+    uint8_t *pat = fw_pattern;
+    int32_t s, k, fresh = track != ch_seen_track;
+    if (!pat)
+        return;
+    for (s = 0; s < SQ_STEPS; s++)
+        for (k = 0; k < 3; k++) {
+            const volatile uint8_t *p = pat + LOCKS + TRACK_LOCKS * track + STEP_LOCKS * s +
+                                        2 * slots[k];
+            int16_t v = (int16_t)(p[0] << 8 | p[1]);
+            if (!fresh && v != ch_seen[s][k] && ch_held_key >= 0 && ch_held_step < 0)
+                ch_held_step = s;
+            ch_seen[s][k] = v;
+        }
+    ch_seen_track = track;
 }
 
 /* 30 times a second: redraw when what the page shows has changed. */
@@ -358,10 +372,14 @@ void chords_tick(void *ctrl)
 {
     struct ch_view v;
     uint32_t s = 0, i;
-    if (!ch_shown() || !ch_view(&v))
+    if (!ch_shown())
         return;
-    s = (uint32_t)(v.track | v.mode << 2 | v.shape << 4 | v.bass << 7 | v.center << 9 |
-                   v.root << 15 | (v.scale + 1) << 22) ^ 0x5a5a5a5au;
+    if (fw_active_track >= 0 && fw_active_track < SQ_AUDIO)
+        ch_watch_locks(fw_active_track);
+    if (!ch_view(&v))
+        return;
+    s = (uint32_t)(v.track | v.mode << 2 | v.shape << 4 | v.bass << 8 | v.center << 10 |
+                   v.root << 16 | (v.scale + 1) << 23) ^ (uint32_t)(v.step + 1) * 0x9e3779b9u;
     for (i = 0; i < CH_MAX_TONES; i++)
         s = s * 31u + (uint8_t)v.last[i];
     if (s != ch_drawn) {
@@ -488,7 +506,12 @@ void chords_draw(void *bmp, void *ctrl)
 
     /* the keyboard box: its title bar, the keyboard, CENTER */
     fw_framerect(bmp, 0, 24, 88, 63, 1);
-    fw_textf(bmp, FONT_TTL, 3, 56, -1, "CHORDS T%d", (int)v.track + 1);
+    if (ch_held_key >= 0 && v.step >= 0)            /* a held trig's chord: its step */
+        fw_textf(bmp, FONT_TTL, 3, 56, -1, "T%d  TRIG %d", (int)v.track + 1, (int)v.step + 1);
+    else if (ch_held_key >= 0)                      /* a long track: turn a knob to find it */
+        fw_textf(bmp, FONT_TTL, 3, 56, -1, "T%d  TRIG ?", (int)v.track + 1);
+    else
+        fw_textf(bmp, FONT_TTL, 3, 56, -1, "CHORDS T%d", (int)v.track + 1);
     ch_rect(bmp, 1, 55, 87, 62, -1);
     center = v.center ? CENT_BASE + v.center : -1;
     lo = v.last[0] >= 0 ? v.last[0] : v.root;

@@ -39,11 +39,20 @@ CENTER   C5     DOR   1-3-5
 |---|---|---|---|
 | A | CENTER | AUTO (centers on the played note), C3-C8; an arrow under the keyboard | the project, per track |
 | B | INV | moves CENTER to the next (right) or last (left) inversion of the chord, as the Digitone II's [+]/[-] on their own; from AUTO it starts at ROOT | the project, per track |
-| D | BASS OCT | 0, -1, -2, -3; "--" and fixed while MODE is OFF | the sound |
-| E | MODE | OFF, CHORD ROOT, CHORD CENTER, CHORD SPREAD | the sound |
+| D | BASS OCT | 0, -1, -2, -3; "--" while MODE is OFF | the sound, or a trig's p-lock |
+| E | MODE | OFF, CHORD ROOT, CHORD CENTER, CHORD SPREAD | the sound, or a trig's p-lock |
 | F | ROOT | the track's keyboard ROOT, a note | the pattern (the stock setting itself) |
 | G | SCALE | the track's keyboard SCALE, by the OS's short names (CHRO, ION, DOR ...) | the pattern (the stock setting itself) |
-| H | SHAPE / TYPE | the Digitone II's, in its order: in a scale 8 shapes, 1-3-5, 1-2-5, 1-3, 1-4, 1-5, 1-4-5, 1-3-5-7, 1-4-7 (**TRIG 1-8** too); on chromatic 12 types, MAJ, MIN, 7TH, MIN7, MAJ7, DIM, DIM7, SUS2, SUS4, 6, MIN6, ADD9 | the sound |
+| H | SHAPE / TYPE | the Digitone II's, in its order: in a scale 8 shapes, 1-3-5, 1-2-5, 1-3, 1-4, 1-5, 1-4-5, 1-3-5-7, 1-4-7; on chromatic 12 types, MAJ, MIN, 7TH, MIN7, MAJ7, DIM, DIM7, SUS2, SUS4, 6, MIN6, ADD9 | the sound, or a trig's p-lock |
+
+**A chord a trig.** D, E and H are stock knobs under the drawn page: turned
+on their own they set the sound, so every trig; turned while a trig is held,
+they p-lock that trig, as any knob does. So each trig can have its own MODE,
+SHAPE and BASS OCT. While a trig is held the title shows it (`T1  TRIG 5`)
+and the page shows that trig's values. On a track longer than 16 steps the
+page cannot see which page of steps is shown: it shows `TRIG ?` until a knob
+is turned, then the step that turn locked. CENTER, ROOT and SCALE are not
+per trig (as on the Digitone II).
 
 The keyboard shows two octaves with a dot on each note of the last chord
 the track played. Notes are named as the Digitone names them: MIDI 60 is C5.
@@ -83,21 +92,24 @@ note outside the scale, or a chord that would leave the MIDI range.
 generator), on the synth tracks. It reads MODE and SHAPE as the step plays
 them: the step's p-lock from the active pattern's lock table (`+0x1e80`,
 10319 bytes a track, 160 a step, a big-endian s16 a slot, -1 none:
-fxkit-dn1's reading), else the sound's slot in `fw_kit`. BASS OCT is slot 0,
-whose lock it does not read (fxkit-dn1 treats slot 0 in a lock row as no
-slot). CENTER is the project data `CHRD`, a byte a track. ROOT and SCALE
+fxkit-dn1's reading), else the sound's slot in `fw_kit`; BASS OCT's too,
+slot 0 (a lock row holds every slot: fxkit-dn1 counts slot 0 in a row's
+locks). CENTER is the project data `CHRD`, a byte a track. ROOT and SCALE
 come from `sq_track_info`. The notes it writes are the lowest note and
 intervals above it, each 1-127, at most 8: seq-events passes them to the
 firmware unchecked. It keeps each track's last notes for the keyboard.
 
-The page is a mod page with no stock knobs (all eight ids 0). While
-`core_page_shown` says it is up, `chords_draw` (`ev_draw`) clears the
-screen and draws it, `chords_enc` (`ev_enc`) takes all eight knobs (C does
-nothing), and `chords_key` (`ev_key`) takes TRIG 1-8, press and release;
-FUNC + TRIG stays stock. `ev_draw` has no brain to ask, so the mod keeps
-the key dispatcher's from its first key or knob event. `chords_tick`
-redraws when what the page shows changes. MODE, SHAPE and BASS OCT are set
-with `core_sound_set`, as a stock knob sets a sound; ROOT and SCALE are
+The page is a mod page whose D, E and H are the parameter slots 184, 182
+and 183 (BASS OCT, MODE, SHAPE), so the stock turns and p-locks them; the
+others are empty. While `core_page_shown` says it is up, `chords_draw`
+(`ev_draw`) clears the screen and draws it, and `chords_enc` (`ev_enc`)
+takes knobs A, B, C, F and G. `chords_key` (`ev_key`) takes no key: it
+watches which TRIG key is held, whose step is the key's on a track of up to
+16 steps; on a longer one `chords_tick` finds it as the step whose lock of
+MODE, SHAPE or BASS OCT changes while the key is held. `ev_draw` has no
+brain to ask, so the mod keeps the key dispatcher's from its first key or
+knob event. `chords_tick` redraws when what the page shows changes. ROOT and
+SCALE are
 written to the active pattern's track bytes (`+0x3cb`, `+0x3ce`) within the
 stock setters' limits (1.43: 0x40035274 clamps ROOT to 0-115, 0x4003553a
 SCALE to -1..34). The stock setters also post a change notification, which
@@ -119,10 +131,10 @@ or BASS OCT: set both once on the page. CENTER starts at AUTO.
 
 ## Not checked yet
 
-- Not yet run on a unit: the page as drawn, its knobs, TRIG 1-8, the chords
-  as played. The layout was previewed on a PC with stand-in fonts.
-- Turning a knob on this page while holding a trig sets the sound, not a
-  p-lock (MODE and SHAPE p-locks set elsewhere still play).
+- Not yet run on a unit: p-locking D, E and H with a trig held, BASS OCT's
+  p-locks (slot 0) as played, and the held trig's values on the page.
+- SHAPE's stock knob runs to 12 whatever SCALE: in a scale the values past
+  the 8th show and play as 1-4-7.
 - ROOT and SCALE written here: whether the keyboard follows at once without
   the stock setter's notification, and what the keyboard's GLOBAL setting
   (the note setup menu) does with a track's own bytes.
