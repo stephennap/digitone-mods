@@ -16,6 +16,7 @@
 |    written count 1 (+0x14) and is writing the note: move.b 7(a2),0x18(a4) (a4 the event, a2 the
 |    request). The builder still needs d1 after it, so this one keeps d0-d1/a0-a1, and calls
 |    chprobe_req(event, request).
+| (0.4: no sites use these; kept for when live chords come back.)
         .section .run, "ax"
         .globl  chprobe_site_a, chprobe_site_b, chprobe_site_c
 chprobe_site_a:

@@ -1,26 +1,58 @@
 {
- "id": "chprobe", "version": "0.3",
+ "id": "chprobe",
+ "version": "0.5",
  "license": "GPL-2.0-or-later",
- "title": "CHORDS live-note probe", "category": "Examples", "author": "stephen",
- "description": "A probe for live chords on the Digitone mk1, with CHORDS (chords-dn1): at the render's two live-note sites and in the keyboard's and MIDI in's event builder it logs each event and, on every synth track, adds the note's fifth as a second note; each block it logs the voices started and released. While CHORDS' page shows, its top part is the log. For testing only.",
- "device": "digitone-mk1", "os": "1.43",
- "sources": ["probe.s", "probe.c"],
- "sites": [
-  {"addr": "0x4009e826", "stock": "17400018700127400014", "op": "jsr", "target": "chprobe_site_a"},
-  {"addr": "0x4009e760", "stock": "17400018700127400014", "op": "jsr", "target": "chprobe_site_b"},
-  {"addr": "0x400ff1d6", "stock": "196a00070018", "op": "jsr", "target": "chprobe_site_c"}
+ "title": "CHORDS live-note probe",
+ "category": "Examples",
+ "author": "stephen",
+ "description": "An arp probe for CHORDS (chords-dn1) on the Digitone mk1: it logs the notes CHORDS hands each trig (S) and each voice started, with its note (V), on the top of CHORDS' page: 6 entries, then it freezes; YES on the page captures the next 6. It changes no sound. For testing only.",
+ "device": "digitone-mk1",
+ "os": "1.43",
+ "sources": [
+  "probe.s",
+  "probe.c"
  ],
- "ports": {"1.44": {"sites": [
-  {"addr": "0x4009e846", "stock": "17400018700127400014", "op": "jsr", "target": "chprobe_site_a"},
-  {"addr": "0x4009e780", "stock": "17400018700127400014", "op": "jsr", "target": "chprobe_site_b"},
-  {"addr": "0x400ff44a", "stock": "196a00070018", "op": "jsr", "target": "chprobe_site_c"}
- ]}},
  "subscribe": [
-  {"event": "ev_render_out", "fn": "chprobe_out", "order": 50},
-  {"event": "ev_key", "fn": "chprobe_key", "order": 40},
-  {"event": "ev_tick", "fn": "chprobe_tick", "order": 60},
-  {"event": "ev_draw", "fn": "chprobe_draw", "order": 60}
+  {
+   "event": "ev_render_out",
+   "fn": "chprobe_out",
+   "order": 50
+  },
+  {
+   "event": "ev_note_queue",
+   "fn": "chprobe_queue",
+   "order": 50
+  },
+  {
+   "event": "ev_fire_notes",
+   "fn": "chprobe_notes",
+   "order": 90
+  },
+  {
+   "event": "ev_key",
+   "fn": "chprobe_key",
+   "order": 40
+  },
+  {
+   "event": "ev_tick",
+   "fn": "chprobe_tick",
+   "order": 60
+  },
+  {
+   "event": "ev_draw",
+   "fn": "chprobe_draw",
+   "order": 60
+  }
  ],
- "resources": {"core": "3.3"},
- "requires": ["core", "chords"]
+ "resources": {
+  "core": "4.1"
+ },
+ "requires": [
+  "core",
+  "seq-events",
+  "chords"
+ ],
+ "ports": {
+  "1.44": {}
+ }
 }
