@@ -28,16 +28,16 @@ On a synth track, press TRIG (the note page) again: the Chords page.
 | CHORDS T1               | OCT
 | [keyboard: the chord,   |  -1
 |  the center's arrow]    | (D)
-| CENTER C4          (A)  |
+| CENTER C5          (A)  |
 +-------------------------+
  MODE   ROOT   SCALE  SHAPE
-CENTER   C4     DOR   1-3-5
+CENTER   C5     DOR   1-3-5
  (E)    (F)     (G)    (H)
 ```
 
 | knob | | values | kept in |
 |---|---|---|---|
-| A | CENTER | AUTO (centers on the played note), C2-C7; an arrow under the keyboard | the project, per track |
+| A | CENTER | AUTO (centers on the played note), C3-C8; an arrow under the keyboard | the project, per track |
 | D | BASS OCT | 0, -1, -2, -3 | the sound |
 | E | MODE | OFF, CHORD ROOT, CHORD CENTER, CHORD SPREAD | the sound |
 | F | ROOT | the track's keyboard ROOT, a note | the pattern (the stock setting itself) |
@@ -45,23 +45,29 @@ CENTER   C4     DOR   1-3-5
 | H | SHAPE | 8 shapes, **TRIG 1-8** too: in a scale 1-3-5, 1-3-5-7, 13579, 1-2-5, 1-4-5, 1-3-5-6, 1-3-5-9, 1-5; on chromatic MAJ, MIN, 7TH, MIN7, MAJ7, DIM, SUS2, SUS4 | the sound |
 
 The keyboard shows two octaves with a dot on each note of the last chord
-the track played.
+the track played. Notes are named as the Digitone names them: MIDI 60 is C5.
 
 - **CHORD ROOT**: the chord stacks up from the played note. With ROOT C and
   SCALE Ionian, 1-3-5: C plays C E G, D plays D F A; 1-3-5-7 on C: C E G B.
 - **CHORD CENTER**: the same notes, each in the octave from CENTER-5 to
-  CENTER+6, so the chords change by inversion around one place. CENTER C4:
-  C plays G3 C4 E4, F plays A3 C4 F4, G plays G3 B3 D4.
+  CENTER+6, so the chords change by inversion around one place. CENTER C5:
+  C plays G4 C5 E5, F plays A4 C5 F5, G plays G4 B4 D5.
 - **CHORD SPREAD**: CENTER's chord with every second note an octave up (C:
-  G3 E4 C5).
+  G4 E5 C6).
 - **BASS OCT** (-1 to -3): the root again, that many octaves below the
   chord's root and under every note. With more than three notes it replaces
-  the root: C3 on 1-3-5-7 at -1 plays C2 E3 G3 B3.
+  the root: C4 on 1-3-5-7 at -1 plays C3 E4 G4 B4.
+
+In a scale the chords are the scale's own: its notes stacked from the played
+one, so in a major key the 7th chords are Imaj7, ii m7, iii m7, IVmaj7, V7,
+vi m7 and vii m7b5, and in harmonic minor the tonic is m(maj7) and the
+leading tone dim7. The 9 is always the scale's next note above the root, an
+octave up. In a scale of 5 or 6 notes there is no 6th or 7th step: those
+shapes run on into the next octave (the root or the 2nd again), and a note
+that comes twice is played once.
 
 It plays as stock when it cannot say: a trig that already holds a chord, a
-note outside the scale, a scale whose notes it does not know (Combo Minor,
-Persian, Iwato, In-Sen, Hirajoshi, Pelog, Spanish), or a chord that would
-leave the MIDI range.
+note outside the scale, or a chord that would leave the MIDI range.
 
 ## How it works
 
@@ -92,10 +98,12 @@ this does not.
 The SCALE byte is -1 for chromatic and 0-34 for the OS's scales, in the
 keyboard menu's order. In 1.43 the names are pointers at `0x40241cd0`
 (Chromatic first, so name k+1 is SCALE k; the short names are entries
-36-71), 23 of the 35 scales are 7-byte records at `0x401d3ed0` (`0xff`
-first for the others, kept elsewhere, not found), and the Note Add menu's
-12 chord shapes are 4-byte records at `0x401d3fc5`. The test checks the
-scale masks and the chromatic shapes against them.
+36-71); every scale is a 13-byte record at `0x401d4e68` (each semitone's
+degree from 1, or 0, then the octave's); the 7-note ones are also 7-byte
+records at `0x401d3ed0` (`0xff` first for the others); the Note Add menu's
+12 chord shapes are 4-byte records at `0x401d3fc5`; and notes are named by
+0x40116d54, "%s%d" with the names at `0x401d40b8` and the octave note / 12.
+The test checks all 35 scale masks and the chromatic shapes against them.
 
 **From 0.3 or 0.4:** those kept MODE and BASS OCT combined (0-12) in slot
 26 and CENT in slot 0. On a sound edited with them, 0.5 reads a stale MODE
@@ -112,8 +120,5 @@ or BASS OCT: set both once on the page. CENTER starts at AUTO.
   (the note setup menu) does with a track's own bytes.
 - Slot 0: it is also where an LFO with no destination points; the LFO's
   destination list may show "Bass octave" for it.
-- Note names assume MIDI 60 = C4; the Digitone's own may differ.
 - A chord uses as many voices as it has notes (up to 6 here), so a track's
   VOICE setting and the other tracks limit how many sound.
-- The textbook notes for Pentatonic Minor and Major, Blues and the two
-  diminished scales are not checked against the OS.

@@ -11,9 +11,8 @@
 #define CH_SCALES    35                 /* the Digitone's SCALE 0-34; -1 is chromatic */
 
 /* Each scale as a 12-bit mask over the semitones above ROOT (bit 0 the root), in the Digitone's
- * SCALE order. The 7-note scales and Whole Tone are the OS's own table (1.43: 0x401d3ed0, 7 bytes a
- * scale); tests/test_chords_dn1.py checks them against the stock file. The other scales are the
- * textbook ones where the name has one meaning; 0 where it does not (those play as stock). */
+ * SCALE order: the OS's own scale table (1.43: 0x401d4e68, 13 bytes a scale, each semitone's degree
+ * from 1 or 0 for none, then the octave's), which tests/test_chords_dn1.py checks all 35 against. */
 #define M(a, b, c, d, e, f, g) ((1u << (a)) | (1u << (b)) | (1u << (c)) | (1u << (d)) | (1u << (e)) | \
                                 (1u << (f)) | (1u << (g)))
 static const uint16_t ch_scale_mask[CH_SCALES] = {
@@ -30,16 +29,16 @@ static const uint16_t ch_scale_mask[CH_SCALES] = {
     M(0, 2, 3, 5, 7, 8, 11),            /* 10 Harmonic Minor */
     M(0, 2, 4, 6, 8, 10, 0),            /* 11 Whole Tone */
     M(0, 3, 5, 6, 7, 10, 0),            /* 12 Blues */
-    0,                                  /* 13 Combo Minor: not known */
-    0,                                  /* 14 Persian: not known */
-    0,                                  /* 15 Iwato: not known */
-    0,                                  /* 16 In-Sen: not known */
-    0,                                  /* 17 Hirajoshi: not known */
-    0,                                  /* 18 Pelog: not known */
+    M(0, 2, 3, 5, 7, 8, 10) | (1u << 11),   /* 13 Combo Minor */
+    M(0, 1, 4, 5, 6, 8, 11),            /* 14 Persian */
+    M(0, 1, 5, 6, 10, 0, 0),            /* 15 Iwato */
+    M(0, 1, 5, 7, 10, 0, 0),            /* 16 In-Sen */
+    M(0, 2, 3, 7, 8, 0, 0),             /* 17 Hirajoshi */
+    M(0, 1, 3, 7, 8, 0, 0),             /* 18 Pelog */
     M(0, 1, 4, 5, 7, 8, 10),            /* 19 Phrygian Dominant */
     M(0, 2, 3, 5, 6, 8, 9) | (1u << 11),    /* 20 Whole-Half Diminished */
     M(0, 1, 3, 4, 6, 7, 9) | (1u << 10),    /* 21 Half-Whole Diminished */
-    0,                                  /* 22 Spanish: not known */
+    M(0, 1, 3, 4, 5, 6, 8) | (1u << 10),    /* 22 Spanish */
     M(0, 2, 4, 5, 6, 8, 10),            /* 23 Major Locrian */
     M(0, 1, 3, 4, 6, 8, 10),            /* 24 Super Locrian */
     M(0, 1, 3, 5, 7, 9, 10),            /* 25 Dorian b2 */
@@ -56,17 +55,19 @@ static const uint16_t ch_scale_mask[CH_SCALES] = {
 #undef M
 
 /* SHAPE, 0-7 (TRIG 1-8). In a scale: the scale steps from the played note (0 the note, 2 a third up
- * the scale, ...), so the chord is the scale's own. With SCALE on chromatic: a chord type, in
- * semitones. -1 ends a list. */
+ * the scale, ...), so the chord is the scale's own; CH_NINTH is the 9th, the step above the note an
+ * octave up, in a scale of any size (in a 7-note scale, 8 steps). With SCALE on chromatic: a chord
+ * type, in semitones. -1 ends a list. */
 #define CH_SHAPES 8
+#define CH_NINTH  9
 static const int8_t ch_shape_steps[CH_SHAPES][6] = {
     { 0, 2, 4, -1 },                    /* 1-3-5 */
     { 0, 2, 4, 6, -1 },                 /* 1-3-5-7 */
-    { 0, 2, 4, 6, 8, -1 },              /* 1-3-5-7-9 */
+    { 0, 2, 4, 6, CH_NINTH, -1 },       /* 1-3-5-7-9 */
     { 0, 1, 4, -1 },                    /* 1-2-5 */
     { 0, 3, 4, -1 },                    /* 1-4-5 */
     { 0, 2, 4, 5, -1 },                 /* 1-3-5-6 */
-    { 0, 2, 4, 8, -1 },                 /* 1-3-5-9 */
+    { 0, 2, 4, CH_NINTH, -1 },          /* 1-3-5-9 */
     { 0, 4, -1 },                       /* 1-5 */
 };
 static const int8_t ch_shape_semis[CH_SHAPES][6] = {
@@ -98,8 +99,8 @@ static void ch_sort(int32_t *t, int32_t n)
  * keyboard's ROOT (a MIDI note); scale: -1 chromatic, else 0-34; shape: 0-7; mode: CH_ROOT,
  * CH_CENTER or CH_SPREAD; center: CENTER POSITION, a MIDI note; bass: BASS OCT, 0 none or 1-3
  * octaves below the chord's root. -> how many of notes[] it wrote (notes[0] the lowest, the rest
- * intervals above it, each 1-127), or 0: play as stock (a scale with no known notes, a note outside
- * the scale, or a chord it cannot place in the MIDI range). */
+ * intervals above it, each 1-127), or 0: play as stock (a SCALE out of range, a note outside the
+ * scale, or a chord it cannot place in the MIDI range). */
 static int32_t ch_chord(int32_t note, int32_t root, int32_t scale, int32_t shape, int32_t mode,
                         int32_t center, int32_t bass, int8_t notes[CH_MAX_TONES])
 {
@@ -127,8 +128,14 @@ static int32_t ch_chord(int32_t note, int32_t root, int32_t scale, int32_t shape
         if (d < 0)
             return 0;
         for (i = 0; ch_shape_steps[shape][i] >= 0; i++) {
-            j = d + ch_shape_steps[shape][i];
-            tones[n++] = note + deg[j % k] - deg[d] + 12 * (j / k);
+            int32_t t, dup = 0;
+            j = d + (ch_shape_steps[shape][i] == CH_NINTH ? k + 1 : ch_shape_steps[shape][i]);
+            t = note + deg[j % k] - deg[d] + 12 * (j / k);
+            for (s = 0; s < n; s++)     /* a small scale's 7th can be its 9th: keep it once */
+                if (tones[s] == t)
+                    dup = 1;
+            if (!dup)
+                tones[n++] = t;
         }
     }
 

@@ -17,7 +17,8 @@ HERE = os.path.dirname(__file__)
 HDR = os.path.join(HERE, '..', 'mods', 'chords-dn1', 'chordmath.h')
 SYX = os.environ.get('ELEKLOADER_DN_SYX', '')
 LOAD = 0x40000400
-SCALES_143 = 0x401d3ed0                 # 35 records of 7 bytes; 0xff first: not a 7-note scale
+SCALES_143 = 0x401d4e68                 # 35 records of 13 bytes: each semitone's degree from 1, or 0
+MODES_143 = 0x401d3ed0                  # 35 records of 7 bytes; 0xff first: not a 7-note scale
 SHAPES_143 = 0x401d3fc5                 # the Note Add menu's chord shapes, 4 bytes each, 0xff unused
 
 
@@ -52,8 +53,9 @@ def masks():
 
 
 # --- a copy of chordmath.h's ch_chord ------------------------------------------------------------
-STEPS = [[0, 2, 4], [0, 2, 4, 6], [0, 2, 4, 6, 8], [0, 1, 4], [0, 3, 4], [0, 2, 4, 5], [0, 2, 4, 8],
-         [0, 4]]
+NINTH = 9                               # the step above the note, an octave up, in any scale
+STEPS = [[0, 2, 4], [0, 2, 4, 6], [0, 2, 4, 6, NINTH], [0, 1, 4], [0, 3, 4], [0, 2, 4, 5],
+         [0, 2, 4, NINTH], [0, 4]]
 SEMIS = [[0, 4, 7], [0, 3, 7], [0, 4, 7, 10], [0, 3, 7, 10], [0, 4, 7, 11], [0, 3, 6], [0, 2, 7],
          [0, 5, 7]]
 ROOT, CENTER, SPREAD = range(3)
@@ -73,7 +75,12 @@ def chord(note, root, scale, shape, mode, center, bass, table):
         if pc not in deg:
             return None
         d = deg.index(pc)
-        tones = [note + deg[(d + o) % k] - deg[d] + 12 * ((d + o) // k) for o in STEPS[shape]]
+        tones = []
+        for o in STEPS[shape]:
+            j = d + (k + 1 if o == NINTH else o)
+            t = note + deg[j % k] - deg[d] + 12 * (j // k)
+            if t not in tones:
+                tones.append(t)
     if mode != ROOT:
         placed, r = [], None
         for i, t in enumerate(tones):
@@ -118,7 +125,7 @@ def play(note, shape, mode=ROOT, center=60, bass=0, root=60, scale=0):
 
 C2, C3, D3, E3, G3, A3, B3 = 36, 48, 50, 52, 55, 57, 59
 C4, D4, E4, F4, G4, A4, B4 = 60, 62, 64, 65, 67, 69, 71
-ION, AEOL, PMIN, COMBO, CHROM = 0, 5, 7, 13, -1
+ION, AEOL, PMIN, WTONE, COMBO, HWDIM, CHROM = 0, 5, 7, 11, 13, 21, -1
 S135, S1357, S13579, S125, S145, S1356, S1359, S15 = range(8)
 MAJ, MIN, SEV, MIN7, MAJ7, DIM, SUS2, SUS4 = range(8)
 
@@ -184,7 +191,28 @@ def test_bass_under_center_and_spread():
 
 def test_stock_when_it_cannot_say():
     assert play(61, S135) is None                               # C# is not in C major
-    assert play(C4, S135, scale=COMBO) is None                  # a scale it does not know
+    assert play(C4, S135, scale=35) is None                     # no such SCALE
+
+
+def test_every_scale_makes_chords():
+    t = masks()
+    for scale in range(35):
+        assert t[scale], scale
+        assert play(C4, S135, scale=scale) is not None, scale
+
+
+def test_the_ninth_is_the_second_an_octave_up_in_any_scale():
+    # 7 notes: Cmaj9's D5
+    assert play(C4, S13579)[-1] == D4 + 12
+    # 8 notes (Combo Minor C D Eb F G Ab Bb B): the 9th is D, not the octave C
+    assert play(C4, S1359, scale=COMBO) == [C4, 63, G4, D4 + 12]
+    # Half-Whole Diminished (C Db Eb E F# G A Bb): C dim7 and its b9, Db
+    assert play(C4, S13579, scale=HWDIM) == [C4, 63, 66, A4, 61 + 12]
+    # 6 notes (Whole Tone C D E F# G# Bb): the 9th is D, not E again
+    assert play(C4, S1359, scale=WTONE) == [C4, E4, 68, D4 + 12]
+    # 5 notes: a 7th and 9th that land on the same note are kept once
+    r = play(C4, S13579, scale=PMIN)
+    assert r is not None and len(r) == len(set(r)) == 4
 
 
 def test_small_scales_keep_each_note_once():
@@ -211,11 +239,23 @@ def test_every_chord_is_safe_for_the_firmware():
 
 
 def test_header_masks_match_the_os_scale_table():
+    """All 35 scales are the OS's own: its table of each semitone's degree."""
+    img = stock_image()
+    t = masks()
+    for k in range(35):
+        rec = img[SCALES_143 - LOAD + 13 * k:SCALES_143 - LOAD + 13 * k + 13]
+        notes = [s for s in range(12) if rec[s]]
+        assert [rec[s] for s in notes] == list(range(1, len(notes) + 1)) and rec[12] == len(notes) + 1
+        want = sum(1 << s for s in notes)
+        assert t[k] == want, 'scale %d: header %03x, OS %03x' % (k, t[k], want)
+
+
+def test_header_masks_match_the_os_mode_table():
     img = stock_image()
     t = masks()
     checked = 0
     for k in range(35):
-        rec = img[SCALES_143 - LOAD + 7 * k:SCALES_143 - LOAD + 7 * k + 7]
+        rec = img[MODES_143 - LOAD + 7 * k:MODES_143 - LOAD + 7 * k + 7]
         if rec[0] == 0xff:              # the OS keeps this scale elsewhere
             continue
         want = 0

@@ -7,13 +7,13 @@
  *   | CHORDS T1               | OCT
  *   | [keyboard: the chord,   |  -1
  *   |  the center's arrow]    | (D)
- *   | CENTER C4          (A)  |
+ *   | CENTER C5          (A)  |
  *   +-------------------------+
  *    MODE   ROOT   SCALE  SHAPE
- *   CENTER   C4     DOR   1-3-5
+ *   CENTER   C5     DOR   1-3-5
  *    (E)    (F)     (G)    (H)
  *
- * A  CENTER POSITION: AUTO (the played note) or C2-C7; the track's, saved with the project
+ * A  CENTER POSITION: AUTO (the played note) or C3-C8 (MIDI 36-96); the track's, saved with the project
  * D  BASS OCT 0 to -3, E  MODE (OFF, CHORD ROOT, CENTER, SPREAD), H  SHAPE (TRIG 1-8 too): the sound's
  * F  ROOT and G  SCALE: the track's keyboard ROOT and SCALE themselves
  *
@@ -32,8 +32,8 @@
                                          * this mod reads the kit, never the render's words */
 #define MODES       4                   /* OFF, ROOT, CENTER, SPREAD */
 #define BASSES      4                   /* 0, -1, -2, -3 */
-#define CENT_MAX    61                  /* CENTER: 0 AUTO (the played note), 1-61 C2-C7 */
-#define CENT_BASE   35                  /* so 1 is C2 (36) */
+#define CENT_MAX    61                  /* CENTER: 0 AUTO (the played note), 1-61 C3-C8 */
+#define CENT_BASE   35                  /* so 1 is MIDI 36, C3 as the OS names it */
 #define ROOT_MAX    115                 /* the stock setter's limits (1.43: 0x40035274, 0x4003553a) */
 #define SCALE_MAX   34
 
@@ -147,15 +147,17 @@ static const char *ch_shape_name(int32_t v, int32_t scale)
     return scale < 0 ? ch_semi_names[v] : ch_step_names[v];
 }
 
-static void ch_note_name(char *buf, int32_t note)  /* MIDI 60 = C4 */
+/* As the OS names notes (1.43: 0x40116d54, "%s%d" with the octave note / 12): MIDI 60 = C5. note:
+ * 0-127, so the octave is 0-10. */
+static void ch_note_name(char *buf, int32_t note)
 {
-    int32_t o = note / 12 - 1;
+    int32_t o = note / 12;
     *buf++ = ch_pcs[2 * (note % 12)];
     if (ch_pcs[2 * (note % 12) + 1] != ' ')
         *buf++ = '#';
-    if (o < 0) {
-        *buf++ = '-';
-        o = -o;
+    if (o >= 10) {
+        *buf++ = '1';
+        o -= 10;
     }
     *buf++ = (char)('0' + o);
     *buf = 0;
