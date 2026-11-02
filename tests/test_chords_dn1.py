@@ -435,8 +435,97 @@ def test_retrig_page_glyphs():
     with open(os.path.join(HERE, '..', 'mods', 'chords-dn1', 'chords.c')) as f:
         glyphs = set(re.findall(r"\{'(.)', \{", f.read()))
     names = [x.strip('"') for x in retrig_table('rt_len_names')]
-    drawn = set(''.join(names)) | set('OFF1/80') | set('-0123456789')
+    gates = [x.strip('"') for x in retrig_table('rt_gate_names')]
+    drawn = set(''.join(names + gates)) | set('OFF1/80') | set('-0123456789')
     assert drawn <= glyphs, drawn - glyphs
+
+
+# ---- RETRIG's GATE and PITCH (retrig.inc 0.18): bits 2-6 of the MODE and BASS locks' high bytes
+
+def rt_pitch_step(code):
+    return code if 1 <= code <= 12 else 12 - code if 13 <= code <= 24 else 0
+
+
+def rt_pitch_pos(code):
+    return code if code >= 25 else 12 + rt_pitch_step(code)
+
+
+def rt_pitch_code(pos):
+    return pos if pos >= 25 else pos - 12 if pos > 12 else 24 - pos if pos < 12 else 0
+
+
+def rt_degree(note, d, root, mask):
+    if not mask:
+        return note + d
+    while d > 0:
+        note += 1
+        if mask >> ((note - root) % 12) & 1:
+            d -= 1
+    while d < 0:
+        note -= 1
+        if mask >> ((note - root) % 12) & 1:
+            d += 1
+    return note
+
+
+def c_mod(a, b):                          # C's %: the sign of the dividend
+    return a - b * int(a / b)
+
+
+def rt_arp(code, k, n):
+    if code == 25:
+        return k % n
+    if code == 26:
+        return n - 1 - k % n
+    period = 2 * n - 2 if n > 1 else 1
+    i = k % period
+    return period - i if i >= n else i
+
+
+def test_retrig_pitch_knob_order():
+    codes = [rt_pitch_code(pos) for pos in range(29)]
+    assert sorted(codes) == list(range(29))                 # every code once
+    assert [rt_pitch_step(c) for c in codes[:25]] == list(range(-12, 13))
+    assert codes[12] == 0 and codes[25:] == [25, 26, 27, 28]
+    for c in range(29):
+        assert rt_pitch_code(rt_pitch_pos(c)) == c
+
+
+def test_retrig_pitch_steps_walk_the_scale_and_wrap():
+    ionian = 0b101010110101                 # C major from root C
+    seq = [rt_degree(60, c_mod(1 * k, 14), 60, ionian) for k in range(16)]
+    assert seq[:8] == [60, 62, 64, 65, 67, 69, 71, 72]
+    assert seq[14] == 60 and seq[15] == 62  # two octaves, then from the start again
+    down = [rt_degree(60, c_mod(-2 * k, 14), 60, ionian) for k in range(4)]
+    assert down == [60, 57, 53, 50]         # down two degrees a hit: A, F, D
+    assert [rt_degree(60, k, 60, 0) for k in range(3)] == [60, 61, 62]     # chromatic: semitones
+
+
+def test_retrig_arp_orders():
+    n = 3
+    assert [rt_arp(25, k, n) for k in range(6)] == [0, 1, 2, 0, 1, 2]
+    assert [rt_arp(26, k, n) for k in range(6)] == [2, 1, 0, 2, 1, 0]
+    assert [rt_arp(27, k, n) for k in range(6)] == [0, 1, 2, 1, 0, 1]
+    assert [rt_arp(27, k, 1) for k in range(3)] == [0, 0, 0]
+
+
+def test_retrig_high_bits_leave_the_knobs():
+    for knob in range(4):
+        for pitch in range(29):
+            hi = knob | pitch << 2
+            assert hi < 0x80 and hi & 3 == knob          # ch_value's mask gives the knob back
+    for pitch in range(29):                              # no knob lock: never -1 (0xff)
+        assert (0x80 | pitch << 2) != 0xff
+    for gate in range(8):
+        assert (0x80 | gate << 2) != 0xff and (3 | gate << 2) & 3 == 3
+
+
+def test_retrig_tables_match_the_source():
+    src = retrig_source()
+    assert 'rt_gates[RT_GATES] = { 0, 1, 2, 3, 4, 5, 6, 8 }' in src
+    assert '#define RT_HI_BITS   0x7c' in src
+    with open(os.path.join(HERE, '..', 'mods', 'chords-dn1', 'chords.c')) as f:
+        assert 'v &= 3;' in f.read()
 
 if __name__ == '__main__':
     ok = bad = skip = 0

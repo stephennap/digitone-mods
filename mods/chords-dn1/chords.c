@@ -91,6 +91,8 @@ static int32_t ch_value(int32_t track, int32_t step, int32_t slot, int32_t hi)
     if (v < 0)
         v = kit ? FW_SOUND_SLOT(kit, track, slot) : 0;
     v >>= 8;
+    if (slot == SLOT_MODE || slot == SLOT_BASS)
+        v &= 3;                         /* the knob's; bits 2-6 are RETRIG's (retrig.inc) */
     return v < 0 ? 0 : v > hi ? hi : v;
 }
 
@@ -355,6 +357,7 @@ static int ch_view(struct ch_view *v)
 }
 
 static int32_t rt_lo(int32_t track, int32_t step, int32_t slot);    /* retrig.inc */
+static int32_t rt_hix(int32_t track, int32_t step, int32_t slot);
 
 /* ---- keys and knobs (the UI task) -------------------------------------------------------------- */
 /* The TRIG keys stay the stock's; the mod only watches which one is held, to show and edit that
@@ -489,12 +492,14 @@ int32_t chords_enc(void *brain, void *ev)
         note = v.note >= 0 ? v.note : FW_TRACK_NOTE(trk);
         if (e == 6) {
             trk[TR_STEP_NOTES + 8 * v.step] = (uint8_t)ch_clamp(note + d, 0, 127);
-        } else if (e == 4) {            /* the low byte, RETRIG's, kept (retrig.inc) */
+        } else if (e == 4) {            /* RETRIG's bits kept (retrig.inc) */
             ch_lock_set(v.track, v.step, SLOT_BASS,
-                        ch_clamp(v.bass + d, 0, BASSES - 1) << 8 | rt_lo(v.track, v.step, SLOT_BASS));
+                        (ch_clamp(v.bass + d, 0, BASSES - 1) | rt_hix(v.track, v.step, SLOT_BASS)) << 8 |
+                        rt_lo(v.track, v.step, SLOT_BASS));
         } else if (e == 5) {
             ch_lock_set(v.track, v.step, SLOT_MODE,
-                        ch_clamp(v.mode + d, 0, MODES - 1) << 8 | rt_lo(v.track, v.step, SLOT_MODE));
+                        (ch_clamp(v.mode + d, 0, MODES - 1) | rt_hix(v.track, v.step, SLOT_MODE)) << 8 |
+                        rt_lo(v.track, v.step, SLOT_MODE));
         } else if (e == 8) {            /* the shape; its own CENTER, the low byte, kept */
             ch_lock_set(v.track, v.step, SLOT_SHAP,
                         ch_clamp(v.shape + d, 0, ch_shape_count(v.scale) - 1) << 8 | v.own);

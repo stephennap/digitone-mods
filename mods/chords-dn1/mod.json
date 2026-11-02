@@ -1,11 +1,11 @@
 {
  "id": "chords",
- "version": "0.17",
+ "version": "0.18",
  "license": "GPL-2.0-or-later",
  "title": "CHORDS (keyboard chord modes)",
  "category": "Sequencer",
  "author": "stephen",
- "description": "The Digitone II's chord modes for the Digitone mk1 and Digitone Keys, on the TRIG key's second page, Chords, drawn after the Digitone II's keyboard setup screen: a keyboard with the last chord and the CENTER arrow (knob A), BASS OCT (D), MODE (E: OFF, CHORD ROOT, CENTER, SPREAD), the track's keyboard ROOT (F) and SCALE (G), and SHAPE (H; the Digitone II's 8 shapes in a scale and its 12 types on chromatic); D, E and H are stock knobs, so holding a trig while turning one p-locks it: a different chord on each trig. With MODE on, each single-note trig on the track plays that chord from ROOT and SCALE; trigs that hold a chord play as stored. So do the notes played live, on the TRIG keys in keyboard mode or over MIDI in, so the arpeggiator gets the chord. The TRIG key's third page, Retrig, repeats a held trig's notes as the Digitakt's retrig does: RATE (E, 1/1 to 1/80), LEN (F, 1/8 step to 32 steps or INF) and VEL fade (G), per trig. Needs core-dn1 4.1 and seq-events.",
+ "description": "The Digitone II's chord modes for the Digitone mk1 and Digitone Keys, on the TRIG key's second page, Chords, drawn after the Digitone II's keyboard setup screen: a keyboard with the last chord and the CENTER arrow (knob A), BASS OCT (D), MODE (E: OFF, CHORD ROOT, CENTER, SPREAD), the track's keyboard ROOT (F) and SCALE (G), and SHAPE (H; the Digitone II's 8 shapes in a scale and its 12 types on chromatic); D, E and H are stock knobs, so holding a trig while turning one p-locks it: a different chord on each trig. With MODE on, each single-note trig on the track plays that chord from ROOT and SCALE; trigs that hold a chord play as stored. So do the notes played live, on the TRIG keys in keyboard mode or over MIDI in, so the arpeggiator gets the chord. The TRIG key's third page, Retrig, repeats a held trig's notes as the Digitakt's retrig does: RATE (E, 1/1 to 1/80), LEN (F, 1/8 step to 32 steps or INF), VEL fade (G), GATE (H: each hit's length) and PITCH (A: each hit a step up or down, or the chord one note a hit), per trig. Needs core-dn1 4.1 and seq-events.",
  "device": "digitone-mk1",
  "os": "1.43",
  "cflags": [
@@ -89,6 +89,11 @@
   {
    "event": "ev_draw",
    "fn": "retrig_draw",
+   "order": 50
+  },
+  {
+   "event": "ev_voice_on",
+   "fn": "retrig_voice",
    "order": 50
   }
  ],
