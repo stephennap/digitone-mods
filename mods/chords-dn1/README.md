@@ -136,7 +136,7 @@ release, 0x400ffd50, puts a list back on `fw_locks_free` at 0). The
 render's exit (`retrig_render`, `ev_render_out`) queues a fresh event
 (`fw_ev_alloc`, a copy, +0x44 the queue's link cleared, its own reference)
 for each hit half a step before its time, with the faded velocity at
-+0x10 (velocity << 8), through `fw_ev_queue`, masked, and only with a free
++0x10 (the velocity << 8 in each half: 0x64006400 for 100), through `fw_ev_queue`, masked, and only with a free
 queue time (`fw_nodes_free`). A hit whose event or time is not to be had
 is skipped. Any newer note trig on the track ends the retrig at its time;
 STOP or pause ends all; a first step's event (kind 1) plays its hits as
@@ -217,10 +217,11 @@ or BASS OCT: set both once on the page. CENTER starts at AUTO.
 
 ## Not checked yet
 
-- Not yet run on a unit: RETRIG (the hits' timing, the velocity fade, INF
-  and its end at the next trig, STOP, a pattern change, a retrig on the
-  first step, voices at 1/80 with a long note: a hit keeps the trig's
-  length, so long notes overlap); chords on the TRIG keys and over MIDI, with and
+- RETRIG's hits play on a unit (0.17). Not yet checked there: INF and its
+  end at the next trig, STOP, a pattern change, a retrig on the first
+  step, voices at 1/80 with a long note (a hit keeps the trig's length, so
+  long notes overlap).
+- Not yet run on a unit: chords on the TRIG keys and over MIDI, with and
   without the arpeggiator; p-locking D, E and H with a trig held, BASS OCT's
   p-locks (slot 0) as played, and the held trig's values on the page, on
   steps 17-64 too (the grid's page read from its state).

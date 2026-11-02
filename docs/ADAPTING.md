@@ -2058,8 +2058,9 @@ EMAC: a handler that uses it leaves MACSR as it found it. For a voice v,
 `fw_voice_track[v]` is its track, `FW_VOICE_PARAM(v, k)` its sound's slot k
 (the locked values of the trig it plays), `fw_voice_pitch[v]` its pitch,
 and bit v of `fw_gate_on` and `fw_gate_off` says it started or was released
-in the last block. `ev_voice_on` passes the note event, whose +0x10 is the
-velocity << 8.
+in the last block. `ev_voice_on` passes the note event, whose +0x10 holds the
+velocity << 8 in each half (0x64006400 for 100; an event with the high
+half 0 plays silent).
 
 **`core_param_override`.** A mod may answer for a stock parameter while it
 wants to (on its own tracks, say) by contributing to the table

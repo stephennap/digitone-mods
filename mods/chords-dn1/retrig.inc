@@ -27,7 +27,8 @@
  * ev_note_queue hands over that event as it is queued, with its time: the mod keeps a copy (and a
  * reference to its p-lock list, as the firmware's own event copy, 0x400ffde8, takes one). The render
  * (ev_render_out) queues a fresh copy for each hit half a step before it plays, with the faded
- * velocity, through the firmware's own queue (fw_ev_alloc, fw_ev_queue). A newer note on the track
+ * velocity (+0x10, the velocity << 8 in each half), through the firmware's own queue (fw_ev_alloc,
+ * fw_ev_queue). Checked on a unit (CH17). A newer note on the track
  * ends a retrig at its time; STOP ends them all. */
 
 #define RT_RATES     18                 /* OFF, then 1/1 .. 1/80 */
@@ -199,7 +200,7 @@ void retrig_queue(void *event, uint32_t time)
 
     if (rt_own || track < 0 || track >= SQ_AUDIO || !rt_arm[track].fired)
         return;
-    if (kind > 1 || (kind == 0 && !(ev[10] & FW_EVENT_NOTE_TRIG)) || !ev[5])
+    if (kind > 1 || (kind == 0 && !(ev[10] & FW_EVENT_NOTE_TRIG)))
         return;                         /* not a note trig's (a lock trig, the arpeggiator) */
     rt_arm[track].fired = 0;
     for (i = 0; i < RT_SLOTS; i++) {
@@ -240,7 +241,7 @@ void retrig_queue(void *event, uint32_t time)
     s->next = time + s->interval;
     s->len = rt_lens[rt_arm[track].len] * RT_EIGHTH;
     s->f = rt_arm[track].f;
-    s->v0 = rt_arm[track].v0 > 0 ? rt_arm[track].v0 : (int32_t)(ev[4] >> 8);
+    s->v0 = rt_arm[track].v0 > 0 ? rt_arm[track].v0 : (int32_t)(ev[4] >> 24);
     s->cut = 0;
     s->active = 1;
 }
@@ -248,7 +249,7 @@ void retrig_queue(void *event, uint32_t time)
 /* One hit of s at s->next. Masked. */
 static void rt_hit(struct rt_slot *s)
 {
-    uint32_t *e, horizon, el, p;
+    uint32_t *e, horizon, el, p, v;
     int32_t i;
     if (!fw_nodes_free || !(e = (uint32_t *)fw_ev_alloc())) {
         rt_short++;
@@ -261,7 +262,10 @@ static void rt_hit(struct rt_slot *s)
     horizon = s->len ? s->len : 16 * 8 * RT_EIGHTH;     /* INF fades over a bar */
     el = s->next - s->t0;
     p = el >= horizon ? 256 : el / (horizon >> 8);
-    e[4] = (uint32_t)rt_vel(s->v0, s->f, (int32_t)(p > 256 ? 256 : p)) << 8 | (s->ev[4] & 0xff);
+    v = (uint32_t)rt_vel(s->v0, s->f, (int32_t)(p > 256 ? 256 : p));
+    /* +0x10 holds the velocity twice, 8.8 in each half (seen on a unit: 0x64006400 for 100; a copy
+     * with the high half 0 plays silent) */
+    e[4] = (v << 8 | (s->ev[4] >> 16 & 0xff)) << 16 | v << 8 | (s->ev[4] & 0xff);
     rt_own = 1;
     fw_ev_queue(e, s->next);
     rt_own = 0;
