@@ -111,7 +111,7 @@ Press TRIG a third time: the Retrig page. Hold a trig and turn:
 | E | RATE | OFF, 1/1 to 1/80: hits a bar (1/16 is one a step), the Digitakt's rates |
 | F | LEN | how long it repeats: 1/8 of a step to 32 steps, or INF (until the track's next trig, or STOP) |
 | G | VEL | the velocity over LEN: -128 fades out to nothing, 0 keeps it, 112 fades in from an eighth (the trig itself too) |
-| H | GATE | each hit's note: TRIG (the trig's own length), or 1/8 to all of the time to the next hit (the trig itself too) |
+| H | GATE | each hit's note: TRIG (the trig's own length), or 1/8 to all of the time to the next hit (the trig itself too). As with the trig's LEN, it is heard only on a sound that sustains (the AMP page's SUS up, REL short) |
 | A | PITCH | each hit a step on from the last, -12 to +12 (scale degrees in a SCALE, semitones on chromatic; after two octaves from the start again), or the chord one note a hit: UP, DOWN, UPDN, RAND (the trig itself plays the first) |
 
 The page draws the hits over LEN (INF: a bar), each as tall as its
@@ -235,8 +235,8 @@ or BASS OCT: set both once on the page. CENTER starts at AUTO.
 
 ## Not checked yet
 
-- RETRIG's hits play on a unit (0.17). Not yet checked there: GATE and
-  PITCH (0.18), INF and its
+- RETRIG's hits play on a unit (0.17), and GATE and PITCH (0.18). Not yet
+  checked there: INF and its
   end at the next trig, STOP, a pattern change, a retrig on the first
   step, voices at 1/80 with a long note (a hit keeps the trig's length, so
   long notes overlap).
