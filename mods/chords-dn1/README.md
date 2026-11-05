@@ -1,10 +1,9 @@
 # CHORDS (Digitone mk1)
 
-The new keyboard chord modes for the Digitone mk1 and Digitone
-Keys, OS 1.43 and 1.44: CHORD ROOT, CHORD CENTER and CHORD SPREAD, with a
-shape, a center position and BASS OCT, on a page drawn after the Digitone
-II's keyboard setup screen. The chords are built from each track's keyboard
-ROOT and SCALE.
+Keyboard chord modes for the Digitone mk1 and Digitone Keys, OS 1.43 and
+1.44, inspired by the Digitone II: CHORD ROOT, CHORD CENTER and CHORD
+SPREAD, with a shape, a center position and BASS OCT, on a page of their
+own. The chords are built from each track's keyboard ROOT and SCALE.
 
 A single-note trig on a track with MODE on plays the chord, and so does a
 note played live: on the TRIG keys in keyboard mode, or over MIDI in on the
@@ -44,12 +43,12 @@ CENTER   C5     DOR   1-3-5
 | knob | | values | kept in |
 |---|---|---|---|
 | A | CENTER | AUTO (centers on the played note), C3-C8; an arrow under the keyboard | the project, per track |
-| B | INV | moves CENTER to the next (right) or last (left) inversion of the chord, as the Digitone II's [+]/[-] on their own; from AUTO it starts at ROOT | the project, per track |
+| B | INV | moves CENTER to the next (right) or last (left) inversion of the chord; from AUTO it starts at ROOT | the project, per track |
 | D | BASS OCT | 0, -1, -2, -3; "--" while MODE is OFF | the sound, or a trig's p-lock |
 | E | MODE | OFF, CHORD ROOT, CHORD CENTER, CHORD SPREAD | the sound, or a trig's p-lock |
 | F | ROOT | the track's keyboard ROOT, a note | the pattern (the stock setting itself) |
 | G | SCALE | the track's keyboard SCALE, by the OS's short names (CHRO, ION, DOR ...) | the pattern (the stock setting itself) |
-| H | SHAPE / TYPE | the Digitone II's, in its order: in a scale 8 shapes, 1-3-5, 1-2-5, 1-3, 1-4, 1-5, 1-4-5, 1-3-5-7, 1-4-7; on chromatic 12 types, MAJ, MIN, 7TH, MIN7, MAJ7, DIM, DIM7, SUS2, SUS4, 6, MIN6, ADD9 | the sound, or a trig's p-lock |
+| H | SHAPE / TYPE | in a scale 8 shapes, 1-3-5, 1-2-5, 1-3, 1-4, 1-5, 1-4-5, 1-3-5-7, 1-4-7; on chromatic 12 types, MAJ, MIN, 7TH, MIN7, MAJ7, DIM, DIM7, SUS2, SUS4, 6, MIN6, ADD9 | the sound, or a trig's p-lock |
 
 **A chord a trig.** Turned on their own, D, E and H set the sound, so every
 trig; turned while a trig is held, they p-lock that trig, as any knob does. So each trig can have its own MODE,
@@ -103,7 +102,7 @@ one, so in a major key 1-3-5-7 gives Imaj7, ii m7, iii m7, IVmaj7, V7, vi m7
 and vii m7b5, and in harmonic minor the tonic is m(maj7) and the leading tone
 dim7. In a scale of 5 or 6 notes there is no 7th step: 1-3-5-7 runs on into
 the next octave. With SCALE on chromatic the 12 types are the Digitone's own
-Note Add chords (the mk1's table and the Digitone II's are the same bytes).
+Note Add chords.
 SHAPE keeps its value when SCALE changes: a type past the 8th is 1-4-7 in a
 scale.
 
