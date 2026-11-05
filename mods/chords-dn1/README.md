@@ -1,6 +1,6 @@
 # CHORDS (Digitone mk1)
 
-The Digitone II's keyboard chord modes for the Digitone mk1 and Digitone
+The new keyboard chord modes for the Digitone mk1 and Digitone
 Keys, OS 1.43 and 1.44: CHORD ROOT, CHORD CENTER and CHORD SPREAD, with a
 shape, a center position and BASS OCT, on a page drawn after the Digitone
 II's keyboard setup screen. The chords are built from each track's keyboard
