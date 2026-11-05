@@ -21,7 +21,7 @@ retrig does: per trig, a RATE, a LEN and a velocity fade (below).
 | needs | core-dn1 4.1 or newer (parameter slots, mod pages, project data, `fw_pattern`, `ev_note_queue`), seq-events |
 | sites | one, the played note's: 0x400ff1d6 (1.44 0x400ff44a), in the builder of a played note's event; and `ev_fire_notes`, `ev_fire_vel`, `ev_note_queue`, `ev_render_out`, `ev_key`, `ev_enc`, `ev_tick`, `ev_draw`, three `core_params`, two `core_pages` and a `core_projdata` entry |
 | claims | `param:182`-`184`, `page:27` and `page:28` (after page 1, the TRIG key's Trig Parameters: Chords, then Retrig), `projdata:CHRD`, and sound slots 26, 65 and 0 (so not with digitables or machines) |
-| RAM | 18.1 KB code, 6.8 KB data (0.18) |
+| RAM | 19.3 KB code, 6.8 KB data (0.19) |
 | sources | [chords.c](chords.c) (the page, its knobs, the handlers), [chordmath.h](chordmath.h) (the chord math, no firmware), [live.s](live.s) (the played note's site), [retrig.inc](retrig.inc) (RETRIG, included by chords.c) |
 | tests | [tests/test_chords_dn1.py](../../tests/test_chords_dn1.py) |
 
@@ -61,6 +61,14 @@ With a trig held, F is that trig's **NOTE**, its chord's root (the trig's own
 note, the one the note page shows), so each trig picks its chord in the key;
 with none held F is the track's ROOT, the key itself.
 
+**Scale lock.** While the track's SCALE is not CHRO, NOTE stays in the
+scale, MODE on or off. F and the stock NOTE knob (the trig's on the TRIG
+page with a trig held, else the track's) move a scale note a detent. Every
+note that plays, from a trig, the TRIG keys or MIDI in, moves to the nearest
+scale note (the lower of two equally near). A pattern's stored notes are
+not rewritten: they only play snapped. A stored chord's note that would land
+on another of its notes keeps its own pitch.
+
 With a trig held, A and B set **that trig's own CENTER** (A by semitones, B
 by inversions of the trig's chord), so each trig can be voiced on its own;
 the page marks it `CNTR C5*`. A trig with none follows the track's CENTER,
@@ -99,8 +107,8 @@ Note Add chords (the mk1's table and the Digitone II's are the same bytes).
 SHAPE keeps its value when SCALE changes: a type past the 8th is 1-4-7 in a
 scale.
 
-It plays as stock when it cannot say: a trig that already holds a chord, a
-note outside the scale, or a chord that would leave the MIDI range.
+It plays as stock when it cannot say: a trig that already holds a chord, or
+a chord that would leave the MIDI range.
 
 ## Retrig
 
@@ -175,6 +183,15 @@ come from `sq_track_info`. The notes it writes are the lowest note and
 intervals above it, each 1-127, at most 8: seq-events passes them to the
 firmware unchecked. It keeps each track's last notes for the keyboard.
 
+The scale lock: `chords_notes` snaps the step's notes first (`ch_snap`,
+chordmath.h), and `chords_played` the played note, keeping the snapped note
+for its release. The stock NOTE knob is on a page the mod cannot see, so
+`ch_watch_notes` (on `ev_tick`, any page) keeps the active track's 64 step
+notes and its NOTE: in the four ticks after any knob turns (`ev_enc`), a
+note that changed to one outside the scale is moved on to the next scale
+note the way it went, a step's only while a TRIG key is held. A note that
+changes with no knob turned, as when a pattern loads, is left as stored.
+
 The page is a mod page whose D, E and H are the parameter slots 184, 182
 and 183 (BASS OCT, MODE, SHAPE), so with no trig held the stock turns them,
 setting the sound; the others are empty. The TRIG key's pages do not p-lock
@@ -234,6 +251,7 @@ The test checks all 35 scale masks and the chromatic shapes against them.
 or BASS OCT: set both once on the page. CENTER starts at AUTO.
 
 ## Not checked yet
+
 
 - RETRIG's hits play on a unit (0.17), and GATE and PITCH (0.18). Not yet
   checked there: INF and its

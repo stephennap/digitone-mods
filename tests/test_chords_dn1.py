@@ -527,6 +527,117 @@ def test_retrig_tables_match_the_source():
     with open(os.path.join(HERE, '..', 'mods', 'chords-dn1', 'chords.c')) as f:
         assert 'v &= 3;' in f.read()
 
+# --- the scale lock: copies of chordmath.h's ch_snap and chords.c's ch_snap_notes -----------------
+def snap(note, root, scale, d, table):
+    if scale < 0 or not 0 <= note <= 127:
+        return note
+    m = table[scale]
+
+    def inside(n):
+        return m >> ((n - root) % 12) & 1
+    if inside(note):
+        return note
+    up = note + 1
+    while up <= 127 and not inside(up):
+        up += 1
+    dn = note - 1
+    while dn >= 0 and not inside(dn):
+        dn -= 1
+    if up > 127:
+        return dn
+    if dn < 0 or d > 0:
+        return up
+    if d < 0:
+        return dn
+    return up if up - note < note - dn else dn
+
+
+def snap_notes(notes, root, scale, table):
+    if scale < 0:
+        return list(notes)
+    b = notes[0]
+    nb = snap(b, root, scale, 0, table)
+    a = [0] * len(notes)
+    for i in range(1, len(notes)):
+        if not notes[i]:
+            continue
+        t = snap(b + notes[i], root, scale, 0, table)
+        if any(a[j] and nb + a[j] == t for j in range(1, i)):
+            t = nb
+        if t <= nb:
+            t = b + notes[i]
+        a[i] = t - nb if nb < t <= nb + 127 else 0
+    return [nb] + a[1:]
+
+
+ION = 0                                 # SCALE 0, Ionian (-1 is chromatic)
+
+
+def test_scale_lock_leaves_scale_notes_and_chromatic_alone():
+    t = masks()
+    for n in (60, 62, 64, 65, 67, 69, 71, 72):
+        assert snap(n, 60, ION, 0, t) == n
+    for n in range(128):
+        assert snap(n, 60, -1, 1, t) == n
+
+
+def test_scale_lock_rounds_to_the_nearest_lower_on_a_tie_or_the_way_it_went():
+    t = masks()
+    assert snap(61, 60, ION, 0, t) == 60          # C#: C and D tie, the lower
+    assert snap(61, 60, ION, 1, t) == 62          # turned up: D
+    assert snap(61, 60, ION, -1, t) == 60         # turned down: C
+    assert snap(66, 60, ION, 0, t) == 65          # F#: F
+    assert snap(66, 62, ION, 0, t) == 66          # in D major F# is the scale's own
+
+
+def test_scale_lock_lands_in_every_scale_nearest_and_in_range():
+    t = masks()
+    for scale in range(35):
+        for root in range(60, 72):
+            inside = [n for n in range(128) if t[scale] >> ((n - root) % 12) & 1]
+            for n in range(128):
+                for d in (-1, 0, 1):
+                    s = snap(n, root, scale, d, t)
+                    assert s in inside, (scale, root, n, d, s)
+                    if d > 0 and s != n and any(x > n for x in inside):
+                        assert s > n
+                    if d < 0 and s != n and any(x < n for x in inside):
+                        assert s < n
+                if n not in inside:
+                    s = snap(n, root, scale, 0, t)
+                    assert abs(s - n) == min(abs(x - n) for x in inside), (scale, root, n)
+
+
+def test_knob_f_walks_the_scale_a_note_a_detent():
+    t = masks()
+    note, out = 60, [60]
+    for _ in range(7):                  # chords_enc's F with a trig held: note + 1, snapped up
+        note = snap(min(note + 1, 127), 60, ION, 1, t)
+        out.append(note)
+    assert out == [60, 62, 64, 65, 67, 69, 71, 72]
+    note = 61                           # a stored note outside the scale: the next one the way it went
+    assert snap(note + 1, 60, ION, 1, t) == 62 and snap(note - 1, 60, ION, -1, t) == 60
+
+
+def test_scale_lock_on_a_stored_chord():
+    t = masks()
+    assert snap_notes([61, 3, 7, 0, 0, 0, 0, 0], 60, ION, t) == [60, 4, 7, 0, 0, 0, 0, 0]
+    assert snap_notes([60, 1, 0, 0, 0, 0, 0, 0], 60, ION, t) == [60, 1, 0, 0, 0, 0, 0, 0]   # C# onto C: kept
+    assert snap_notes([60, 4, 5, 0, 0, 0, 0, 0], 60, ION, t) == [60, 4, 5, 0, 0, 0, 0, 0]
+    assert snap_notes([61, 0, 0, 0, 0, 0, 0, 0], 60, -1, t) == [61, 0, 0, 0, 0, 0, 0, 0]
+
+
+def test_scale_lock_copies_match_the_source():
+    with open(HDR) as f:
+        src = f.read()
+    assert 'return up - note < note - dn ? up : dn;' in src
+    assert 'if (dn < 0 || dir > 0)' in src
+    with open(os.path.join(HERE, '..', 'mods', 'chords-dn1', 'chords.c')) as f:
+        c = f.read()
+    assert 'a[i] = t > nb && t - nb <= 127 ? t - nb : 0;' in c
+    assert 'ch_snap(ch_clamp(note + s, 0, 127), v.root, v.scale, s)' in c
+
+
 if __name__ == '__main__':
     ok = bad = skip = 0
     for n in sorted(k for k in list(globals()) if k.startswith('test_')):

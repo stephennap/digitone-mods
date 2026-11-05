@@ -110,22 +110,50 @@ static int32_t ch_step_center(int32_t track, int32_t step)
     return p[1] <= CENT_MAX ? p[1] : 0;
 }
 
+/* The scale lock on a step's notes (notes[0] a MIDI note, the rest 0 or intervals above it): each
+ * note to the nearest scale note. A stored chord's note that would land on another of its notes, or
+ * on or below the first, keeps its own pitch; one that then sits on or below the first is dropped. */
+static void ch_snap_notes(int8_t notes[SQ_NOTES], int32_t root, int32_t scale)
+{
+    int32_t i, j, b = notes[0], nb, t, a[SQ_NOTES];
+    if (scale < 0)
+        return;
+    nb = ch_snap(b, root, scale, 0);
+    for (i = 1; i < SQ_NOTES; i++) {
+        a[i] = 0;
+        if (!notes[i])
+            continue;
+        t = ch_snap(b + notes[i], root, scale, 0);
+        for (j = 1; j < i; j++)
+            if (a[j] && nb + a[j] == t)
+                t = nb;
+        if (t <= nb)
+            t = b + notes[i];
+        a[i] = t > nb && t - nb <= 127 ? t - nb : 0;
+    }
+    notes[0] = (int8_t)nb;
+    for (i = 1; i < SQ_NOTES; i++)
+        notes[i] = (int8_t)a[i];
+}
+
 /* Interrupt level, after every note generator. */
 void chords_notes(int32_t track, int32_t step, int8_t notes[SQ_NOTES])
 {
     struct sq_track info;
     int8_t out[CH_MAX_TONES];
-    int32_t i, n, mode, center, c;
+    int32_t i, n, mode, center, c, keyed;
 
     if (track < 0 || track >= SQ_AUDIO || notes[0] < 0)
         return;
+    keyed = sq_track_info(track, &info, sizeof info) >= 0 && info.root != SQ_ROOT_NONE;
+    if (keyed)                          /* the scale lock, MODE or not */
+        ch_snap_notes(notes, info.root, info.scale);
     mode = ch_value(track, step, SLOT_MODE, MODES - 1);
     n = 0;
     if (mode) {
         for (i = 1; i < SQ_NOTES && !notes[i]; i++)     /* a stored chord plays as stored */
             ;
-        if (i == SQ_NOTES && sq_track_info(track, &info, sizeof info) >= 0 &&
-            info.root != SQ_ROOT_NONE) {
+        if (i == SQ_NOTES && keyed) {
             c = ch_step_center(track, step);               /* the trig's own, else the track's */
             if (!c)
                 c = ch_center[track];
@@ -148,22 +176,22 @@ static int8_t ch_held_notes[SQ_AUDIO][128][CH_MAX_TONES];
 static uint8_t ch_held_count[SQ_AUDIO][128];
 
 /* The builder of a played note's event (the UI or the MIDI task): the event (+8 its track, +0x14 its
- * count, +0x18 on its notes, absolute) holds the note alone. On a synth track with MODE on, a press
- * gets the chord the sound's MODE, SHAPE and BASS OCT and the track's ROOT, SCALE and CENTER make of
- * it (no p-locks: no step plays it); a release (the request's flags 0) gets the chord its press
- * got. */
+ * count, +0x18 on its notes, absolute) holds the note alone. A note outside the track's SCALE moves
+ * to the nearest scale note (the scale lock). On a synth track with MODE on, a press gets the chord
+ * the sound's MODE, SHAPE and BASS OCT and the track's ROOT, SCALE and CENTER make of that note (no
+ * p-locks: no step plays it); a release (the request's flags 0) gets the notes its press got. */
 void chords_played(uint8_t *ev, const uint8_t *req)
 {
     struct sq_track info;
     int8_t out[CH_MAX_TONES];
-    int32_t track = *(volatile int32_t *)(ev + 8), note = (int8_t)ev[0x18], i, n, mode, c;
+    int32_t track = *(volatile int32_t *)(ev + 8), note = (int8_t)ev[0x18], i, n, mode, c, played;
     int release = *(const volatile uint32_t *)(req + 0x10) == 0;
 
     if (track < 0 || track >= SQ_AUDIO || note < 0)
         return;
     if (release) {
         n = ch_held_count[track][note];
-        if (n < 2)
+        if (!n)
             return;
         for (i = 0; i < n; i++)
             ev[0x18 + i] = (uint8_t)ch_held_notes[track][note][i];
@@ -172,12 +200,20 @@ void chords_played(uint8_t *ev, const uint8_t *req)
         return;
     }
     ch_held_count[track][note] = 0;
+    if (sq_track_info(track, &info, sizeof info) < 0 || info.root == SQ_ROOT_NONE)
+        return;
+    played = ch_snap(note, info.root, info.scale, 0);   /* the scale lock, MODE or not */
+    if (played != note) {               /* its release plays the same note */
+        ev[0x18] = (uint8_t)played;
+        ch_held_notes[track][note][0] = (int8_t)played;
+        ch_held_count[track][note] = 1;
+    }
     mode = ch_value(track, -1, SLOT_MODE, MODES - 1);
-    if (!mode || sq_track_info(track, &info, sizeof info) < 0 || info.root == SQ_ROOT_NONE)
+    if (!mode)
         return;
     c = ch_center[track];
-    n = ch_chord(note, info.root, info.scale, ch_value(track, -1, SLOT_SHAP, CH_TYPES - 1), mode - 1,
-                 c ? CENT_BASE + c : note, ch_value(track, -1, SLOT_BASS, BASSES - 1), out);
+    n = ch_chord(played, info.root, info.scale, ch_value(track, -1, SLOT_SHAP, CH_TYPES - 1), mode - 1,
+                 c ? CENT_BASE + c : played, ch_value(track, -1, SLOT_BASS, BASSES - 1), out);
     if (n < 2)
         return;
     for (i = 0; i < n; i++) {           /* the event's notes are absolute */
@@ -462,6 +498,48 @@ static int32_t ch_center_turn(int32_t c, int32_t e, int32_t d, int32_t note, uin
     return ch_clamp(n, CENT_BASE + 1, CENT_BASE + CENT_MAX) - CENT_BASE;
 }
 
+/* ---- the scale lock on the stock NOTE knob ----------------------------------------------------- */
+/* The TRIG page's NOTE knob is the stock's, on a page the mod cannot see. So the UI tick watches the
+ * active track's notes (each step's, and the track's NOTE) and, in the few ticks after a knob turned,
+ * moves a note that changed to one outside the track's SCALE on to the next scale note the way it
+ * went: each detent a scale note. A step's note only while a TRIG key is held, as the stock edits
+ * one. Notes that change with no knob turned (a pattern loading) are left as they are; they play
+ * snapped (chords_notes). */
+#define CH_TURN_TICKS 4
+static int32_t ch_turned;
+static int8_t ch_note_seen[SQ_STEPS + 1];
+static int32_t ch_note_track = -1;
+static const uint8_t *ch_note_pat;
+
+static void ch_watch_notes(int32_t track)
+{
+    uint8_t *pat = fw_pattern, *trk, *p;
+    int32_t s, was, now, nn, root, scale, fresh = track != ch_note_track || pat != ch_note_pat;
+    if (!pat)
+        return;
+    trk = FW_TRACK(pat, track);
+    root = ch_clamp(FW_TRACK_ROOT(trk), 0, 127);
+    scale = FW_TRACK_SCALE(trk);
+    for (s = 0; s <= SQ_STEPS; s++) {
+        p = s < SQ_STEPS ? trk + TR_STEP_NOTES + 8 * s : &FW_TRACK_NOTE(trk);
+        now = (int8_t)*p;
+        was = ch_note_seen[s];
+        if (!fresh && ch_turned && now != was && now >= 0 && scale >= 0 &&
+            (s == SQ_STEPS || ch_held_key >= 0)) {
+            nn = ch_snap(now, root, scale, was >= 0 ? now - was : 0);
+            if (nn != now) {
+                *p = (uint8_t)nn;
+                now = nn;
+            }
+        }
+        ch_note_seen[s] = (int8_t)now;
+    }
+    ch_note_track = track;
+    ch_note_pat = pat;
+    if (ch_turned)
+        ch_turned--;
+}
+
 /* While the page shows, these knobs are ours: A CENTER, B its inversion steps, F ROOT, G SCALE (C
  * does nothing); D, E and H are the stock's, the sound's. With a trig held: A, B its own CENTER (in
  * its SHAPE p-lock's low byte), F its note, D, E, H its p-locks (ch_lock_set), G nothing. */
@@ -473,6 +551,8 @@ int32_t chords_enc(void *brain, void *ev)
     int32_t d, i;
 
     ch_brain = brain;
+    if (e >= 1 && e <= 8)
+        ch_turned = CH_TURN_TICKS;      /* the scale lock's watch (ch_watch_notes) */
     if (e < 1 || e > 8 || !core_page_shown(brain, &chords_page) || !ch_view(&v))
         return 0;
     if (ch_held_key < 0 && (e == 4 || e == 5 || e == 8))
@@ -490,8 +570,15 @@ int32_t chords_enc(void *brain, void *ev)
         if (v.step < 0)
             return 1;
         note = v.note >= 0 ? v.note : FW_TRACK_NOTE(trk);
-        if (e == 6) {
-            trk[TR_STEP_NOTES + 8 * v.step] = (uint8_t)ch_clamp(note + d, 0, 127);
+        if (e == 6) {                   /* a scale note a detent (the scale lock) */
+            int32_t s = d > 0 ? 1 : -1, k = d > 0 ? d : -d, nn;
+            for (; k > 0; k--) {
+                nn = ch_snap(ch_clamp(note + s, 0, 127), v.root, v.scale, s);
+                if ((nn - note) * s <= 0)   /* the range's end */
+                    break;
+                note = nn;
+            }
+            trk[TR_STEP_NOTES + 8 * v.step] = (uint8_t)note;
         } else if (e == 4) {            /* RETRIG's bits kept (retrig.inc) */
             ch_lock_set(v.track, v.step, SLOT_BASS,
                         (ch_clamp(v.bass + d, 0, BASSES - 1) | rt_hix(v.track, v.step, SLOT_BASS)) << 8 |
@@ -562,6 +649,8 @@ void chords_tick(void *ctrl)
 {
     struct ch_view v;
     uint32_t s = 0, i;
+    if (fw_active_track >= 0 && fw_active_track < SQ_AUDIO)
+        ch_watch_notes(fw_active_track);    /* the scale lock, on any page */
     if (!ch_shown())
         return;
     if (fw_active_track >= 0 && fw_active_track < SQ_AUDIO)

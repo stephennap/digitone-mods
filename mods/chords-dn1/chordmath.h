@@ -92,6 +92,35 @@ static int32_t ch_shape_count(int32_t scale)
     return scale < 0 ? CH_TYPES : CH_SHAPES;
 }
 
+/* 1 when SCALE (0-34) on ROOT holds the note. */
+static int32_t ch_in_scale(uint32_t mask, int32_t root, int32_t note)
+{
+    return (mask >> (((note - root) % 12 + 12) % 12)) & 1;
+}
+
+/* The scale lock: the note itself when the scale holds it (and on chromatic, or a SCALE out of
+ * range), else the next scale note up (dir > 0), down (dir < 0), or the nearer of the two (dir 0;
+ * the lower on a tie), in 0-127. note: a MIDI note 0-127; root: the keyboard's ROOT. */
+static int32_t ch_snap(int32_t note, int32_t root, int32_t scale, int32_t dir)
+{
+    uint32_t mask;
+    int32_t up, dn;
+    if (scale < 0 || scale >= CH_SCALES || !(mask = ch_scale_mask[scale]) || note < 0 || note > 127 ||
+        ch_in_scale(mask, root, note))
+        return note;
+    for (up = note + 1; up <= 127 && !ch_in_scale(mask, root, up); up++)
+        ;
+    for (dn = note - 1; dn >= 0 && !ch_in_scale(mask, root, dn); dn--)
+        ;
+    if (up > 127)
+        return dn;
+    if (dn < 0 || dir > 0)
+        return up;
+    if (dir < 0)
+        return dn;
+    return up - note < note - dn ? up : dn;
+}
+
 /* MODE: how the chord's notes are placed. */
 enum { CH_ROOT, CH_CENTER, CH_SPREAD, CH_MODES };
 
