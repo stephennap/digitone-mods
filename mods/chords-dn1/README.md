@@ -1,9 +1,8 @@
 # CHORDS (Digitone mk1)
 
-Keyboard chord modes for the Digitone mk1 and Digitone Keys, OS 1.43 and
-1.44, inspired by the Digitone II: CHORD ROOT, CHORD CENTER and CHORD
-SPREAD, with a shape, a center position and BASS OCT, on a page of their
-own. The chords are built from each track's keyboard ROOT and SCALE.
+New chords for the Digitone mk1 and Digitone Keys, OS 1.43 and 1.44:
+CHORD ROOT, CHORD CENTER and CHORD SPREAD, with a shape, a center
+position and BASS OCT, on a page of their own. The chords are built from each track's keyboard ROOT and SCALE.
 
 A single-note trig on a track with MODE on plays the chord, and so does a
 note played live: on the TRIG keys in keyboard mode, or over MIDI in on the

@@ -53,7 +53,7 @@ def masks():
 
 
 # --- a copy of chordmath.h's ch_chord ------------------------------------------------------------
-# The Digitone II's SHAPEs (in a scale: steps) and TYPEs (on chromatic: semitones), in its order
+# The SHAPEs (in a scale: steps) and TYPEs (on chromatic: semitones), in the page's order
 STEPS = [[0, 2, 4], [0, 1, 4], [0, 2], [0, 3], [0, 4], [0, 3, 4], [0, 2, 4, 6], [0, 3, 6]]
 SEMIS = [[0, 4, 7], [0, 3, 7], [0, 4, 7, 10], [0, 3, 7, 10], [0, 4, 7, 11], [0, 3, 6], [0, 3, 6, 9],
          [0, 2, 7], [0, 5, 7], [0, 4, 7, 9], [0, 3, 7, 9], [0, 2, 4, 7]]
@@ -158,7 +158,7 @@ def test_bass_oct_adds_a_root_below_or_replaces_it():
 
 
 def test_every_shape_in_a_scale():
-    """The Digitone II's eight, on C in C major."""
+    """The eight, on C in C major."""
     assert play(C4, S125) == [C4, D4, G4]
     assert play(C4, S13) == [C4, E4]
     assert play(C4, S14) == [C4, F4]
@@ -198,7 +198,7 @@ def test_center_keeps_the_hand_in_place():
 
 
 def test_inversion_steps_move_the_center_one_inversion():
-    """The Digitone II's [+]/[-]: knob B. C major around C4 (MIDI 60): G C E, then C E G, E G C."""
+    """Knob B. C major around C4 (MIDI 60): G C E, then C E G, E G C."""
     cmaj = {0, 4, 7}
     up = inversion(cmaj, C4, 1)
     assert play(C4, S135, CENTER, up) == [C4, E4, G4]
@@ -320,8 +320,7 @@ def test_header_masks_match_the_os_mode_table():
 
 
 def test_chromatic_types_are_the_os_chord_shapes():
-    """The 12 TYPEs, MAJ ... ADD9, are the mk1's Note Add shapes in order (and the Digitone II's
-    own table, 1.12: 0x4020e235, is the same bytes)."""
+    """The 12 TYPEs, MAJ ... ADD9, are the mk1's Note Add shapes in order."""
     img = stock_image()
     os_shapes = [[b for b in img[SHAPES_143 - LOAD + 4 * k:SHAPES_143 - LOAD + 4 * k + 4] if b != 0xff]
                  for k in range(12)]

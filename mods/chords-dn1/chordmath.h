@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /* CHORDS' chord math: pure functions, no firmware, so the same code builds for the Digitone and is
- * copied line for line by tests/test_chords_dn1.py. After the Digitone II's keyboard chord modes:
- * CHORD ROOT, CHORD CENTER and CHORD SPREAD, a SHAPE, and BASS OCT. */
+ * copied line for line by tests/test_chords_dn1.py. The chord modes: CHORD ROOT, CHORD CENTER and
+ * CHORD SPREAD, a SHAPE, and BASS OCT. */
 #ifndef CHORDS_CHORDMATH_H
 #define CHORDS_CHORDMATH_H
 
@@ -54,11 +54,10 @@ static const uint16_t ch_scale_mask[CH_SCALES] = {
 };
 #undef M
 
-/* SHAPE, as the Digitone II offers it (its OS 1.12's names at 0x402a1348, in this order). In a scale,
+/* SHAPE, in the page's order. In a scale,
  * the shapes are scale degrees: the steps from the played note (0 the note, 2 a third up the scale,
  * ...), so the chord is the scale's own; TRIG 1-8 pick them. With SCALE on chromatic, TYPE: a chord
- * type in semitones, the Digitone II's 12 (0x4020e235), which are the mk1's own Note Add shapes
- * (1.43: 0x401d3fc5) byte for byte; tests/test_chords_dn1.py checks them. -1 ends a list. */
+ * type in semitones: the mk1's own 12 Note Add shapes (1.43: 0x401d3fc5) byte for byte; tests/test_chords_dn1.py checks them. -1 ends a list. */
 #define CH_SHAPES 8                     /* in a scale: 1-3-5 ... 1-4-7 */
 #define CH_TYPES  12                    /* on chromatic: MAJ ... ADD9 */
 static const int8_t ch_shape_steps[CH_SHAPES][5] = {
@@ -250,7 +249,7 @@ static int32_t ch_chord(int32_t note, int32_t root, int32_t scale, int32_t shape
     return n;
 }
 
-/* The Digitone II's [+]/[-] on their own: CENTER POSITION to the next inversion of a chord, up
+/* Knob B: CENTER POSITION to the next inversion of a chord, up
  * (dir > 0) or down. pcs: the chord's note classes, bit p for C+p. CENTER places each note from
  * center-5 to center+6, so a center just past the lowest note (lowest+6) lifts exactly that note an
  * octave, and highest-7 drops exactly the highest. -> the new center, or center for no chord. */

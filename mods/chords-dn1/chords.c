@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* CHORDS: the Digitone II's keyboard chord modes for the Digitone mk1 and Digitone Keys (core-dn1 3.3,
- * seq-events), on the TRIG key's second page, Chords, which this mod draws itself after the Digitone
- * II's keyboard setup screen:
+/* CHORDS: new chords for the Digitone mk1 and Digitone Keys (core-dn1 3.3, seq-events), on the TRIG
+ * key's second page, Chords, which this mod draws itself:
  *
  *   +-------------------------+ BASS
  *   | CHORDS T1               | OCT
@@ -14,7 +13,7 @@
  *    (E)    (F)     (G)    (H)
  *
  * A  CENTER POSITION: AUTO (the played note) or C3-C8 (MIDI 36-96); the track's, saved with the project
- * B  CENTER POSITION to the next or the last inversion of the chord (the Digitone II's [+]/[-])
+ * B  CENTER POSITION to the next or the last inversion of the chord
  * D  BASS OCT 0 to -3 (with MODE on: "--" with it off), E  MODE (OFF, CHORD ROOT, CENTER, SPREAD),
  * H  SHAPE: the sound's, as stock knobs, so a trig held while one turns p-locks it (a chord a trig);
  *    while a trig is held the page shows its chord
@@ -235,7 +234,7 @@ static void ch_text(char *buf, const char *s)
 }
 
 static const char *const ch_mode_names[MODES] = { "OFF", "ROOT", "CENTER", "SPREAD" };
-/* The Digitone II's own names and order (its OS 1.12: 0x402a1348, 0x401d5808). */
+/* SHAPE's names, in the page's order. */
 static const char *const ch_step_names[CH_SHAPES] = {
     "1-3-5", "1-2-5", "1-3", "1-4", "1-5", "1-4-5", "1-3-5-7", "1-4-7"
 };
