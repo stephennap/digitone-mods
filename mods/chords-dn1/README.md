@@ -19,7 +19,7 @@ retrig does: per trig, a RATE, a LEN and a velocity fade (below).
 | needs | core-dn1 4.1 or newer (parameter slots, mod pages, project data, `fw_pattern`, `ev_note_queue`), seq-events |
 | sites | one, the played note's: 0x400ff1d6 (1.44 0x400ff44a), in the builder of a played note's event; and `ev_fire_notes`, `ev_fire_vel`, `ev_note_queue`, `ev_render_out`, `ev_key`, `ev_enc`, `ev_tick`, `ev_draw`, three `core_params`, two `core_pages` and a `core_projdata` entry |
 | claims | `param:182`-`184`, `page:27` and `page:28` (after page 1, the TRIG key's Trig Parameters: Chords, then Retrig), `projdata:CHRD`, and sound slots 26, 65 and 0 (so not with digitables or machines) |
-| RAM | 19.3 KB code, 6.8 KB data (0.19) |
+| RAM | 19.3 KB code, 6.8 KB data (0.20) |
 | sources | [chords.c](chords.c) (the page, its knobs, the handlers), [chordmath.h](chordmath.h) (the chord math, no firmware), [live.s](live.s) (the played note's site), [retrig.inc](retrig.inc) (RETRIG, included by chords.c) |
 | tests | [tests/test_chords_dn1.py](../../tests/test_chords_dn1.py) |
 
@@ -135,12 +135,19 @@ its BASS OCT p-lock. PITCH (0 none, 1-12 up, 13-24 down 1-12, 25-28 UP,
 DOWN, UPDN, RAND) is bits 2-6 of the MODE lock's high byte, and GATE (0-7)
 bits 2-4 of the BASS OCT lock's: the knobs are bits 0-1, which `ch_value`
 masks out, and D and E keep the rest when they set the lock. A trig with no
-MODE or BASS OCT lock gets the high byte 0x80 with those bits: a negative
-value that is not -1 (0xf0 at most), which `ch_value` and the rows' lock
-count (the stock's, 0x40023ed2, tests bit 7) read as no lock, so RETRIG
-never fixes a trig's MODE or BASS OCT. Setting everything back to its
-default (OFF; LEN 1, VEL 0, GATE TRIG, PITCH OFF) on such a trig writes -1
-again.
+MODE or BASS OCT lock gets a lock marked by a bit neither uses, `RT_ALONE`:
+bit 7 of MODE's low byte (RATE is 0-17), bit 6 of BASS OCT's high byte
+(GATE is bits 2-4). `ch_value` reads it as no lock, so RETRIG never fixes a
+trig's MODE or BASS OCT. Setting everything back to its default (OFF; LEN 1,
+VEL 0, GATE TRIG, PITCH OFF) on such a trig writes -1 again.
+
+The marker keeps the word positive because the pattern's save drops a
+negative lock: its decoder (1.44: 0x40008ee6), used by the temp save's
+reload (FUNC + NO) and by loading a project, clears every lock row and puts
+back only the words that are not negative. Up to 0.19 the marker was the
+high byte 0x80, a negative word, so a retrig on a trig with no MODE or BASS
+OCT lock was lost on a reload or a project load. 0.20 still reads such a
+lock, and writes the new marker the next time RETRIG is set on that trig.
 
 **Playback.** On a retrig trig's fire `retrig_notes` (`ev_fire_notes`)
 marks the track; `retrig_queue` (core 4.1's `ev_note_queue`, masked) takes

@@ -77,6 +77,32 @@ static void ch_loaded(int32_t found)
 struct core_projdata chords_projdata = { 0x43485244u /* "CHRD" */, 4, ch_center, ch_loaded };
 
 /* ---- the chords ------------------------------------------------------------------------------- */
+/* A MODE or BASS OCT lock that holds RETRIG's bits alone, with no value of the knob, is marked by a
+ * bit neither uses: MODE's low byte's bit 7 (RATE is 0-17), BASS OCT's high byte's bit 6 (GATE is
+ * bits 2-4). The word stays positive: the pattern's save keeps a lock only when it is (its decoder,
+ * 1.44: 0x40008ee6, skips a negative value), so a negative marker was lost on save and reload. */
+#define RT_ALONE(slot) ((slot) == SLOT_MODE ? 0x0080 : 0x4000)
+
+/* 1 when a slot's lock word w holds the knob's own value. */
+static int32_t ch_knob_locked(int32_t w, int32_t slot)
+{
+    if (w < 0)                          /* none, or 0.14-0.19's retrig alone (high byte 0x80) */
+        return 0;
+    return !((slot == SLOT_MODE || slot == SLOT_BASS) && (w & RT_ALONE(slot)));
+}
+
+/* A step's row count (+0x9e), as the stock keeps it (0x40023ed2): its locks, the positive words. */
+static void ch_row_count(int32_t track, int32_t step)
+{
+    uint8_t *row = fw_pattern + LOCKS + TRACK_LOCKS * track + STEP_LOCKS * step;
+    int32_t k, n = 0;
+    for (k = 0; k < SLOTS; k++)
+        if (!(row[2 * k] & 0x80))
+            n++;
+    row[LOCK_COUNT] = (uint8_t)(n >> 8);
+    row[LOCK_COUNT + 1] = (uint8_t)n;
+}
+
 /* A knob's value as this step plays it, 8.8 >> 8: its p-lock, else the sound's. step < 0: the
  * sound's. A lock row holds every slot, slot 0 too (fxkit-dn1 counts it in a row's locks). */
 static int32_t ch_value(int32_t track, int32_t step, int32_t slot, int32_t hi)
@@ -86,6 +112,8 @@ static int32_t ch_value(int32_t track, int32_t step, int32_t slot, int32_t hi)
     if (slot >= 0 && pat && step >= 0 && step < SQ_STEPS) {
         const volatile uint8_t *p = pat + LOCKS + TRACK_LOCKS * track + STEP_LOCKS * step + 2 * slot;
         v = (int16_t)(p[0] << 8 | p[1]);
+        if (!ch_knob_locked(v, slot))
+            v = -1;
     }
     if (v < 0)
         v = kit ? FW_SOUND_SLOT(kit, track, slot) : 0;
@@ -448,7 +476,6 @@ static void ch_lock_set(int32_t track, int32_t step, int32_t slot, int32_t value
 {
     uint8_t *pat = fw_pattern, *t, *row;
     volatile uint16_t *w;
-    int32_t k, n = 0;
     if (!pat || track < 0 || track >= SQ_AUDIO || step < 0 || step >= SQ_STEPS || slot < 0 ||
         slot >= SLOTS)
         return;
@@ -456,11 +483,7 @@ static void ch_lock_set(int32_t track, int32_t step, int32_t slot, int32_t value
     row = t + STEP_LOCKS * step;
     row[2 * slot] = (uint8_t)(value >> 8);
     row[2 * slot + 1] = (uint8_t)value;
-    for (k = 0; k < SLOTS; k++)         /* the row's count (0x40023ed2) */
-        if (!(row[2 * k] & 0x80))
-            n++;
-    row[LOCK_COUNT] = (uint8_t)(n >> 8);
-    row[LOCK_COUNT + 1] = (uint8_t)n;
+    ch_row_count(track, step);
     t[LOCK_USED + slot] = 1;            /* (0x400241f6) */
     w = &FW_STEP(FW_TRACK(pat, track), step);
     if (!(*w & (FW_STEP_TRIG | FW_STEP_LOCK_TRIG)))

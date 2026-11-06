@@ -23,10 +23,10 @@
  * p-lock and PITCH bits 2-6 of its high byte; its LEN (low nibble) and VEL (high nibble) the low byte
  * of its BASS p-lock and GATE bits 2-4 of its high byte. The knobs, MODE and BASS OCT, are the high
  * bytes' bits 0-1 (0-3): ch_value masks the rest off, and D and E keep it. A trig with retrig and no
- * MODE (or BASS) lock gets a high byte of 0x80 with those bits: a negative value that is not -1
- * (none; 0xf0 at most), which the lock rows' count (the stock's 0x40023ed2 and ch_lock_set) and
- * ch_value read as no lock, so retrig never fixes a trig's MODE or BASS OCT. Copied, pasted and cleared with
- * the trig, as its locks are.
+ * MODE (or BASS) lock gets a lock marked RT_ALONE (chords.c: a bit neither uses), which ch_value reads
+ * as no lock, so retrig never fixes a trig's MODE or BASS OCT. It stays a positive word, so the
+ * pattern's save and reload keep it (0.14-0.19 marked it with the sign bit, and the save dropped it).
+ * Copied, pasted and cleared with the trig, as its locks are.
  *
  * Playback: seq-events' fire tells which track's next queued event is a retrig trig (rt_arm); core's
  * ev_note_queue hands over that event as it is queued, with its time: the mod keeps a copy (and a
@@ -49,7 +49,6 @@
 #define RT_FAR       172800000          /* two bars: a hit further than this is a jump of the timeline */
 #define RT_SLOTS     8                  /* retrigs playing at once, all tracks */
 #define RT_PER_BLOCK 4                  /* hits one retrig queues in one render block, at most */
-#define RT_NONE_HI   0x80               /* a lock row's high byte: retrig only, no lock of the knob */
 #define EV_LONGS     (0x48 / 4)
 
 static const uint8_t rt_rates[RT_RATES] = { 0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 64, 80 };
@@ -102,20 +101,33 @@ static volatile uint8_t *rt_cell(int32_t track, int32_t step, int32_t slot)
     return pat + LOCKS + TRACK_LOCKS * track + STEP_LOCKS * step + 2 * slot;
 }
 
-#define RT_HI_BITS   0x7c               /* the high byte's bits retrig keeps (2-6) */
+#define RT_HI_BITS   0x7c               /* the high byte's bits retrig keeps (2-6; BASS OCT's 2-4) */
 
-/* The low byte retrig keeps in a slot's lock, 0 with no lock. */
-static int32_t rt_lo(int32_t track, int32_t step, int32_t slot)
+/* A slot's lock word for a step: -1 none. */
+static int32_t rt_word(int32_t track, int32_t step, int32_t slot)
 {
     volatile uint8_t *p = rt_cell(track, step, slot);
-    return p && p[0] != 0xff ? p[1] : 0;
+    return p ? (int16_t)(p[0] << 8 | p[1]) : -1;
 }
 
-/* The high byte's bits retrig keeps (RT_HI_BITS, in place), 0 with no lock. */
+/* The high byte's bits retrig keeps in a slot (RT_HI_BITS: MODE's PITCH; BASS OCT's GATE). */
+static int32_t rt_hi_bits(int32_t slot)
+{
+    return slot == SLOT_MODE ? RT_HI_BITS : 0x1c;
+}
+
+/* The low byte retrig keeps in a slot's lock (not MODE's RT_ALONE bit), 0 with no lock. */
+static int32_t rt_lo(int32_t track, int32_t step, int32_t slot)
+{
+    int32_t w = rt_word(track, step, slot);
+    return w == -1 ? 0 : slot == SLOT_MODE ? w & 0x7f : w & 0xff;
+}
+
+/* The high byte's bits retrig keeps (rt_hi_bits, in place), 0 with no lock. */
 static int32_t rt_hix(int32_t track, int32_t step, int32_t slot)
 {
-    volatile uint8_t *p = rt_cell(track, step, slot);
-    return p && p[0] != 0xff ? p[0] & RT_HI_BITS : 0;
+    int32_t w = rt_word(track, step, slot);
+    return w == -1 ? 0 : (w >> 8) & rt_hi_bits(slot);
 }
 
 static void rt_read(int32_t track, int32_t step, struct rt_trig *r)
@@ -130,32 +142,25 @@ static void rt_read(int32_t track, int32_t step, struct rt_trig *r)
     r->gate = (rt_hix(track, step, SLOT_BASS) >> 2) & 7;
 }
 
-/* Write retrig's bits of a slot's lock (hix: RT_HI_BITS in place; lo: the low byte), keeping its
- * knob's value (bits 0-1): a lock keeps it; none gets the high byte RT_NONE_HI | hix (no knob lock,
- * not counted) unless both are 0; that with both 0 is none again. The rows are by bytes (odd
- * addresses on odd tracks). UI task. */
+/* Write retrig's bits of a slot's lock (hix: rt_hi_bits in place; lo: the low byte), keeping its
+ * knob's value (bits 0-1): a knob's lock keeps it; otherwise retrig's alone, marked RT_ALONE, unless
+ * both are 0, which is none again. Through ch_lock_set, so the row's count stays the stock's. UI
+ * task. */
 static void rt_set(int32_t track, int32_t step, int32_t slot, int32_t hix, int32_t lo)
 {
     volatile uint8_t *p = rt_cell(track, step, slot);
+    int32_t w;
     if (!p)
         return;
-    if (p[0] == 0xff) {
-        if (!hix && !lo)
-            return;
-        p[1] = (uint8_t)lo;
-        p[0] = (uint8_t)(RT_NONE_HI | hix);
-        fw_pattern[LOCKS + TRACK_LOCKS * track + LOCK_USED + slot] = 1;
-    } else if (p[0] & 0x80) {           /* retrig's alone */
-        if (!hix && !lo) {
-            p[0] = 0xff;
-            p[1] = 0xff;
-        } else {
-            p[1] = (uint8_t)lo;
-            p[0] = (uint8_t)(RT_NONE_HI | hix);
-        }
-    } else {                            /* the knob's lock, with retrig's bits */
-        p[1] = (uint8_t)lo;
-        p[0] = (uint8_t)((p[0] & 3) | hix);
+    w = (int16_t)(p[0] << 8 | p[1]);
+    if (ch_knob_locked(w, slot))
+        ch_lock_set(track, step, slot, ((w >> 8 & 3) | hix) << 8 | lo);
+    else if (hix || lo)
+        ch_lock_set(track, step, slot, (hix << 8 | lo) | RT_ALONE(slot));
+    else if (w != -1) {                 /* retrig's alone, back to its defaults: none again */
+        p[0] = 0xff;
+        p[1] = 0xff;
+        ch_row_count(track, step);
     }
 }
 

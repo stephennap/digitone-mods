@@ -411,12 +411,56 @@ def test_retrig_storage_round_trips():
     assert rt_store(0, 5, 0) == (0, 0)      # retrig off, defaults: no lock is written
 
 
-def test_retrig_never_reads_as_a_knob_lock():
-    # with no MODE or BASS lock, retrig writes the high byte 0x80: negative, not -1, so ch_value
-    # (v < 0: the sound's) and the rows' count (bit 7: none) read no lock
-    for lo in range(1, 256):
-        v = (0x80 << 8 | lo) - 0x10000
-        assert v < 0 and v != -1
+RT_ALONE_MODE, RT_ALONE_BASS = 0x0080, 0x4000      # chords.c's RT_ALONE
+
+
+def rt_word(knob, hix, lo, alone):        # retrig.inc's rt_set: a knob's lock (knob 0-3) or retrig's alone
+    if knob is not None:
+        return (knob | hix) << 8 | lo
+    return (hix << 8 | lo) | alone if hix or lo else -1
+
+
+def knob_locked(w, alone):                # chords.c's ch_knob_locked
+    return w >= 0 and not w & alone
+
+
+def saved(w):                             # the pattern's save and reload (1.44: 0x40008ee6): w >= 0 kept
+    return w if w >= 0 else -1
+
+
+def test_retrig_alone_survives_save_and_never_reads_as_a_knob_lock():
+    for rate in range(18):
+        for pitch in range(29):
+            w = rt_word(None, pitch << 2, rate, RT_ALONE_MODE)
+            if w == -1:
+                continue
+            assert saved(w) == w and not knob_locked(w, RT_ALONE_MODE)
+            assert (w >> 8) & 0x7c == pitch << 2 and w & 0x7f == rate     # rt_hix, rt_lo
+    for gate in range(8):
+        for lo in range(256):
+            w = rt_word(None, gate << 2, lo, RT_ALONE_BASS)
+            if w == -1:
+                continue
+            assert saved(w) == w and not knob_locked(w, RT_ALONE_BASS)
+            assert (w >> 8) & 0x1c == gate << 2 and w & 0xff == lo
+
+
+def test_a_knob_lock_with_retrig_stays_a_knob_lock():
+    for knob in range(4):
+        for rate in range(18):
+            for pitch in range(29):
+                w = rt_word(knob, pitch << 2, rate, RT_ALONE_MODE)
+                assert saved(w) == w and knob_locked(w, RT_ALONE_MODE) and (w >> 8) & 3 == knob
+        for gate in range(8):
+            for lo in range(256):
+                w = rt_word(knob, gate << 2, lo, RT_ALONE_BASS)
+                assert saved(w) == w and knob_locked(w, RT_ALONE_BASS) and (w >> 8) & 3 == knob
+
+
+def test_old_retrig_alone_reads_as_no_knob_lock():
+    for lo in range(1, 256):              # 0.14-0.19: the high byte 0x80
+        w = (0x80 << 8 | lo) - 0x10000
+        assert not knob_locked(w, RT_ALONE_MODE) and not knob_locked(w, RT_ALONE_BASS)
 
 
 def test_retrig_fade():
@@ -513,10 +557,8 @@ def test_retrig_high_bits_leave_the_knobs():
         for pitch in range(29):
             hi = knob | pitch << 2
             assert hi < 0x80 and hi & 3 == knob          # ch_value's mask gives the knob back
-    for pitch in range(29):                              # no knob lock: never -1 (0xff)
-        assert (0x80 | pitch << 2) != 0xff
     for gate in range(8):
-        assert (0x80 | gate << 2) != 0xff and (3 | gate << 2) & 3 == 3
+        assert (3 | gate << 2) & 3 == 3 and not (3 | gate << 2) & 0x40       # BASS OCT's RT_ALONE bit free
 
 
 def test_retrig_tables_match_the_source():
@@ -524,7 +566,10 @@ def test_retrig_tables_match_the_source():
     assert 'rt_gates[RT_GATES] = { 0, 1, 2, 3, 4, 5, 6, 8 }' in src
     assert '#define RT_HI_BITS   0x7c' in src
     with open(os.path.join(HERE, '..', 'mods', 'chords-dn1', 'chords.c')) as f:
-        assert 'v &= 3;' in f.read()
+        c = f.read()
+    assert 'v &= 3;' in c
+    assert '#define RT_ALONE(slot) ((slot) == SLOT_MODE ? 0x0080 : 0x4000)' in c
+    assert 'return slot == SLOT_MODE ? RT_HI_BITS : 0x1c;' in src
 
 # --- the scale lock: copies of chordmath.h's ch_snap and chords.c's ch_snap_notes -----------------
 def snap(note, root, scale, d, table):
